@@ -13,8 +13,9 @@ export const gemini = {
   readConfig(env) {
     return {
       apiKey: env.GEMINI_API_KEY,
-      voiceModel: env.GEMINI_VOICE_MODEL || 'gemini-2.5-flash-native-audio-preview-12-2025',
-      textModel: env.GEMINI_TEXT_MODEL || 'gemini-flash-latest',
+      voiceModel: env.GEMINI_VOICE_MODEL || 'gemini-3.8-live',
+      textModel: env.GEMINI_TEXT_MODEL || 'gemini-flash-lite-latest',
+      textFallbackModel: env.GEMINI_TEXT_FALLBACK_MODEL || 'gemini-flash-latest',
       realtimeUrl: env.GEMINI_REALTIME_URL
         || 'wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent',
       apiBase: env.GEMINI_API_BASE || 'https://generativelanguage.googleapis.com/v1beta',
@@ -137,8 +138,9 @@ export const gemini = {
   },
 
   async generateText(config, { system, user }) {
-    const res = await fetch(`${config.apiBase}/models/${config.textModel}:generateContent`, {
+    const request = (model) => fetch(`${config.apiBase}/models/${model}:generateContent`, {
       method: 'POST',
+      signal: AbortSignal.timeout(30000),
       headers: { 'Content-Type': 'application/json', 'x-goog-api-key': config.apiKey },
       body: JSON.stringify({
         systemInstruction: { parts: [{ text: system }] },
@@ -146,6 +148,23 @@ export const gemini = {
         generationConfig: { temperature: 0.3, responseMimeType: 'application/json' },
       }),
     });
+    // The free tier often answers 503 "high demand" or stalls: retry once,
+    // then try the fallback model.
+    const attempts = [config.textModel, config.textModel, config.textFallbackModel];
+    let res = null;
+    let lastError = null;
+    for (const [i, model] of attempts.entries()) {
+      if (i > 0) await new Promise((resolve) => setTimeout(resolve, 1000));
+      try {
+        res = await request(model);
+      } catch (err) {
+        res = null;
+        lastError = err;
+        continue;
+      }
+      if (res.status !== 503 && res.status !== 429) break;
+    }
+    if (!res) throw lastError;
     if (!res.ok) throw new Error(`Gemini generateContent failed: ${res.status} ${await res.text()}`);
     const data = await res.json();
     return (data.candidates?.[0]?.content?.parts ?? []).map((p) => p.text ?? '').join('');

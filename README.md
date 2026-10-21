@@ -71,8 +71,9 @@ API 키는 서버에만 있고, 브라우저는 오디오 전송(`input_audio_bu
 | --- | --- | --- |
 | `VOICE_PROVIDER` | `gemini` | `gemini` 또는 `grok` |
 | `GEMINI_API_KEY` | | Google AI Studio에서 발급 |
-| `GEMINI_VOICE_MODEL` | `gemini-2.5-flash-native-audio-preview-12-2025` | Live API 음성 모델 (`npm run gemini:models`로 확인) |
-| `GEMINI_TEXT_MODEL` | `gemini-flash-latest` | 통화 후 리포트용 |
+| `GEMINI_VOICE_MODEL` | `gemini-3.8-live` | Live API 음성 모델 (`npm run gemini:models`로 확인). 실측 응답 지연 약 1.6~2초 (2.5 native-audio 모델은 5~7초) |
+| `GEMINI_TEXT_MODEL` | `gemini-flash-lite-latest` | 통화 후 리포트용. 무료 티어에서 가장 안정적 (실측 15~20초) |
+| `GEMINI_TEXT_FALLBACK_MODEL` | `gemini-flash-latest` | 위 모델이 혼잡(503)하거나 응답이 없을 때 사용 |
 | `XAI_API_KEY` | | xAI 콘솔에서 발급 |
 | `XAI_VOICE_MODEL` | `grok-voice-latest` | 현재 Grok Voice 3.0을 가리키는 별칭. 버전 고정은 `grok-voice-3.0` |
 | `XAI_TEXT_MODEL` | `grok-4-1-fast-non-reasoning` | 통화 후 리포트용 |

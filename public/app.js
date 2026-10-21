@@ -21,6 +21,7 @@ const state = {
   turnsById: new Map(),
   endedReason: null,
   lastError: null,
+  tutorAnswered: false,
 };
 
 function showScreen(name) {
@@ -83,6 +84,7 @@ async function startCall() {
   state.turnsById = new Map();
   state.endedReason = null;
   state.lastError = null;
+  state.tutorAnswered = false;
   state.responseActive = false;
   $('#transcript').replaceChildren();
   $('#call-error').hidden = true;
@@ -133,7 +135,8 @@ function updateTimer() {
 
 function tick() {
   const speaking = state.player?.isPlaying;
-  setStatus(speaking ? '튜터가 말하는 중' : state.mic?.muted ? '음소거됨' : '듣고 있어요');
+  if (!state.tutorAnswered) setStatus('튜터가 전화를 받는 중…');
+  else setStatus(speaking ? '튜터가 말하는 중' : state.mic?.muted ? '음소거됨' : '듣고 있어요');
   $('#avatar').classList.toggle('speaking', Boolean(speaking));
   const level = Math.min(1, (state.mic?.level ?? 0) * 3);
   $('#mic-ring').style.transform = `scale(${1 + level * 0.35})`;
@@ -188,6 +191,7 @@ function handleServerEvent(event) {
       state.responseActive = false;
       break;
     case 'response.output_audio.delta':
+      state.tutorAnswered = true;
       state.player?.enqueue(event.delta, event.item_id);
       break;
     case 'response.output_audio_transcript.delta':
@@ -230,7 +234,7 @@ async function showFeedback() {
   $('#feedback-meta').textContent =
     `${LANGUAGE_LABELS[state.options.language]} · ${Math.floor(duration / 60)}분 ${duration % 60}초 · 발화 ${turns.filter((t) => t.role === 'user').length}회`
     + (state.endedReason === 'max_duration' ? ' · 최대 통화 시간에 도달했어요' : '');
-  $('#feedback-body').innerHTML = '<p class="muted">튜터가 대화를 검토하고 있어요…</p>';
+  $('#feedback-body').innerHTML = '<p class="muted">튜터가 대화를 검토하고 있어요… (20초 정도 걸릴 수 있어요)</p>';
   renderTranscript(turns);
   state.startedAt = 0;
 

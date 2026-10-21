@@ -82,6 +82,7 @@ export const grok = {
   async generateText(config, { system, user }) {
     const res = await fetch(`${config.apiBase}/chat/completions`, {
       method: 'POST',
+      signal: AbortSignal.timeout(30000),
       headers: {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${config.apiKey}`,
