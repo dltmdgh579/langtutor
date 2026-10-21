@@ -5,6 +5,53 @@ const $ = (selector) => document.querySelector(selector);
 const LANGUAGE_LABELS = {
   en: '영어', ja: '일본어', zh: '중국어', es: '스페인어', fr: '프랑스어', de: '독일어',
 };
+const LEVEL_LABELS = { beginner: '초급', intermediate: '중급', advanced: '고급' };
+const TOPIC_LABELS = {
+  free: '자유 대화', daily: '일상 · 취미', travel: '여행 상황극', business: '비즈니스', interview: '면접 연습',
+};
+const CORRECTION_LABELS = { gentle: '자연스럽게', active: '적극적으로' };
+// Browser text-to-speech languages for the report's "listen" buttons.
+const SPEECH_LANGS = { en: 'en-US', ja: 'ja-JP', zh: 'zh-CN', es: 'es-ES', fr: 'fr-FR', de: 'de-DE' };
+// Languages written without spaces are diffed per character instead of per word.
+const UNSPACED_LANGUAGES = new Set(['ja', 'zh']);
+
+// Persona for each provider voice (Gemini and Grok). The portraits in
+// /tutors are Open Peeps by Pablo Stanley (CC0), generated with DiceBear.
+const TUTORS = {
+  kore: { trait: '또렷하고 차분한', tile: '#dce5f9' },
+  puck: { trait: '밝고 경쾌한', tile: '#fbefc4' },
+  aoede: { trait: '산뜻하고 편안한', tile: '#d3eeee' },
+  charon: { trait: '차분한 설명형', tile: '#d8f0da' },
+  leda: { trait: '젊고 생기 있는', tile: '#f6dcef' },
+  orus: { trait: '단단하고 믿음직한', tile: '#f7dcd8' },
+  fenrir: { trait: '에너지 넘치는', tile: '#fde6c4' },
+  zephyr: { trait: '밝고 화사한', tile: '#f9edbf' },
+  eve: { trait: '에너지 넘치는', tile: '#f7dcd8' },
+  ara: { trait: '따뜻하고 다정한', tile: '#d3eeee' },
+  leo: { trait: '차분하고 믿음직한', tile: '#dce5f9' },
+  rex: { trait: '자신감 있는', tile: '#d8f0da' },
+  sal: { trait: '부드럽고 편안한', tile: '#fde6c4' },
+};
+const DEFAULT_TUTOR = { trait: '원어민 튜터', tile: '#e5e8eb' };
+
+const SETTINGS_KEY = 'langtutor:settings';
+const CAPTIONS_KEY = 'langtutor:captions';
+
+// Preferences only; the app works the same when storage is unavailable.
+function loadPref(key) {
+  try {
+    return JSON.parse(localStorage.getItem(key));
+  } catch {
+    return null;
+  }
+}
+function savePref(key, value) {
+  try {
+    localStorage.setItem(key, JSON.stringify(value));
+  } catch {
+    // ignore
+  }
+}
 
 const state = {
   ws: null,
@@ -16,16 +63,44 @@ const state = {
   startedAt: 0,
   timer: null,
   rafId: null,
-  // Ordered transcript entries: { itemId, role, text, el }
+  // Ordered transcript entries: { itemId, role, text, el, textEl }
   turns: [],
   turnsById: new Map(),
   endedReason: null,
   lastError: null,
   tutorAnswered: false,
+  userSpoke: false,
+  tutorLevel: 0,
+  captions: loadPref(CAPTIONS_KEY) ?? true,
+  // Bumped per report request so a slow response can't overwrite a newer one.
+  feedbackToken: 0,
+  feedbackTurns: [],
 };
+
+function tutorInfo(voice) {
+  return TUTORS[voice?.toLowerCase()] ?? DEFAULT_TUTOR;
+}
+
+// Fills a .photo element with the tutor's portrait, or their initial if there is none.
+function setPhoto(photo, voice) {
+  photo.style.setProperty('--tile', tutorInfo(voice).tile);
+  photo.classList.remove('fallback');
+  const img = photo.querySelector('img') ?? photo.appendChild(document.createElement('img'));
+  img.alt = '';
+  img.hidden = false;
+  img.onerror = () => {
+    img.hidden = true;
+    photo.classList.add('fallback');
+    photo.dataset.initial = voice.charAt(0).toUpperCase();
+    photo.append(document.createTextNode(photo.dataset.initial));
+  };
+  for (const node of [...photo.childNodes]) if (node.nodeType === Node.TEXT_NODE) node.remove();
+  img.src = `/tutors/${voice.toLowerCase()}.svg`;
+}
 
 function showScreen(name) {
   for (const el of document.querySelectorAll('.screen')) el.hidden = el.dataset.screen !== name;
+  window.scrollTo(0, 0);
 }
 
 function setStatus(text) {
@@ -51,20 +126,31 @@ function readOptions() {
   };
 }
 
-// ---------- transcript ----------
+function topicLabel(options) {
+  if (options.topic === 'custom') return options.customTopic || '직접 정하기';
+  return TOPIC_LABELS[options.topic] ?? TOPIC_LABELS.free;
+}
+
+// ---------- live captions ----------
 
 function upsertTurn(itemId, role, text, { append = false, final = false } = {}) {
   let turn = state.turnsById.get(itemId);
   if (!turn) {
     const el = document.createElement('div');
-    el.className = `bubble ${role}`;
-    turn = { itemId, role, text: '', el };
+    el.className = `line ${role}`;
+    const who = document.createElement('span');
+    who.className = 'line-who';
+    who.textContent = role === 'user' ? '나' : capitalize(state.options.voice);
+    const textEl = document.createElement('p');
+    textEl.className = 'line-text';
+    el.append(who, textEl);
+    turn = { itemId, role, text: '', el, textEl };
     state.turns.push(turn);
     state.turnsById.set(itemId, turn);
     $('#transcript').append(el);
   }
   turn.text = append ? turn.text + text : text;
-  turn.el.textContent = turn.text || '…';
+  turn.textEl.textContent = turn.text || '…';
   turn.el.classList.toggle('interim', role === 'user' && !final);
   const box = $('#transcript');
   box.scrollTop = box.scrollHeight;
@@ -80,19 +166,32 @@ function transcriptForFeedback() {
 
 async function startCall() {
   state.options = readOptions();
+  savePref(SETTINGS_KEY, state.options);
   state.turns = [];
   state.turnsById = new Map();
   state.endedReason = null;
   state.lastError = null;
   state.tutorAnswered = false;
+  state.userSpoke = false;
+  state.tutorLevel = 0;
   state.responseActive = false;
+  state.feedbackToken++;
+
+  const { voice, language, level } = state.options;
+  document.body.style.setProperty('--tile', tutorInfo(voice).tile);
+  document.body.classList.add('in-call');
+  $('#call-backdrop').src = `/tutors/${voice.toLowerCase()}.svg`;
+  setPhoto($('#orb .photo'), voice);
+  $('#tutor-name').textContent = capitalize(voice);
+  $('#call-meta').textContent = `${LANGUAGE_LABELS[language]} · ${LEVEL_LABELS[level]} · ${topicLabel(state.options)}`;
   $('#transcript').replaceChildren();
   $('#call-error').hidden = true;
-  $('#tutor-name').textContent = capitalize(state.options.voice);
-  $('#tutor-lang').textContent = `${LANGUAGE_LABELS[state.options.language]} 튜터`;
+  $('#call-tip').hidden = true;
+  $('#call-timer').hidden = true;
   $('#call-timer').textContent = '00:00';
-  $('#mute-btn').classList.remove('active');
-  $('#mute-btn span').textContent = '음소거';
+  $('#orb').classList.add('ringing');
+  setMuted(false);
+  applyCaptions();
   showScreen('call');
   setStatus('연결 중…');
 
@@ -130,22 +229,49 @@ async function onReady({ inputSampleRate, outputSampleRate }) {
 
 function updateTimer() {
   const sec = Math.floor((Date.now() - state.startedAt) / 1000);
-  $('#call-timer').textContent = `${String(Math.floor(sec / 60)).padStart(2, '0')}:${String(sec % 60).padStart(2, '0')}`;
+  $('#call-timer').textContent = formatClock(sec);
 }
 
 function tick() {
   const speaking = state.player?.isPlaying;
-  if (!state.tutorAnswered) setStatus('튜터가 전화를 받는 중…');
-  else setStatus(speaking ? '튜터가 말하는 중' : state.mic?.muted ? '음소거됨' : '듣고 있어요');
-  $('#avatar').classList.toggle('speaking', Boolean(speaking));
-  const level = Math.min(1, (state.mic?.level ?? 0) * 3);
-  $('#mic-ring').style.transform = `scale(${1 + level * 0.35})`;
-  $('#mic-ring').style.opacity = String(0.15 + level * 0.6);
+  if (!state.tutorAnswered) setStatus('전화 거는 중…');
+  else if (speaking) setStatus('말하는 중');
+  else if (state.mic?.muted) setStatus('음소거됨');
+  else setStatus('듣고 있어요');
+
+  $('#call-timer').hidden = !state.tutorAnswered;
+  $('#orb').classList.toggle('ringing', !state.tutorAnswered);
+  $('#call-tip').hidden = !state.tutorAnswered || state.userSpoke;
+
+  // Smooth the tutor's level a little so the ring breathes instead of flickering.
+  const target = Math.min(1, (state.player?.level ?? 0) * 2.5);
+  state.tutorLevel += (target - state.tutorLevel) * 0.35;
+  document.body.style.setProperty('--tutor-level', state.tutorLevel.toFixed(3));
+  const micLevel = Math.min(1, (state.mic?.level ?? 0) * 3);
+  $('#mute-btn .mic-level').style.setProperty('--mic-level', micLevel.toFixed(3));
+
   state.rafId = requestAnimationFrame(tick);
 }
 
 function send(event) {
   if (state.ws?.readyState === WebSocket.OPEN) state.ws.send(JSON.stringify(event));
+}
+
+function setMuted(muted) {
+  if (state.mic) state.mic.muted = muted;
+  const btn = $('#mute-btn');
+  btn.setAttribute('aria-pressed', String(muted));
+  btn.querySelector('use').setAttribute('href', muted ? '#i-mic-off' : '#i-mic');
+  btn.querySelector('.ctrl-label').textContent = muted ? '음소거 해제' : '음소거';
+}
+
+function applyCaptions() {
+  $('#captions').classList.toggle('off', !state.captions);
+  $('#captions-btn').setAttribute('aria-pressed', String(state.captions));
+  if (state.captions) {
+    const box = $('#transcript');
+    box.scrollTop = box.scrollHeight;
+  }
 }
 
 function bargeIn() {
@@ -174,11 +300,13 @@ function handleServerEvent(event) {
       state.endedReason = event.reason;
       break;
     case 'input_audio_buffer.speech_started':
+      state.userSpoke = true;
       bargeIn();
-      // Reserve the learner's bubble now so it stays above the tutor's reply.
+      // Reserve the learner's line now so it stays above the tutor's reply.
       upsertTurn(event.item_id, 'user', '');
       break;
     case 'conversation.item.input_audio_transcription.updated':
+      state.userSpoke = true;
       upsertTurn(event.item_id, 'user', event.transcript);
       break;
     case 'conversation.item.input_audio_transcription.completed':
@@ -222,42 +350,68 @@ function endCall() {
   state.mic = null;
   state.player = null;
   state.ctx = null;
+  document.body.classList.remove('in-call');
+  document.body.style.removeProperty('--tutor-level');
   showFeedback();
 }
 
-// ---------- feedback ----------
+// ---------- report ----------
 
-async function showFeedback() {
-  showScreen('feedback');
+function showFeedback() {
   const turns = transcriptForFeedback();
+  const userTurns = turns.filter((t) => t.role === 'user').length;
   const duration = state.startedAt ? Math.round((Date.now() - state.startedAt) / 1000) : 0;
-  $('#feedback-meta').textContent =
-    `${LANGUAGE_LABELS[state.options.language]} · ${Math.floor(duration / 60)}분 ${duration % 60}초 · 발화 ${turns.filter((t) => t.role === 'user').length}회`
-    + (state.endedReason === 'max_duration' ? ' · 최대 통화 시간에 도달했어요' : '');
-  $('#feedback-body').innerHTML = '<p class="muted">튜터가 대화를 검토하고 있어요… (20초 정도 걸릴 수 있어요)</p>';
-  renderTranscript(turns);
   state.startedAt = 0;
+  state.feedbackTurns = turns;
 
-  if (!turns.some((t) => t.role === 'user')) {
-    $('#feedback-body').replaceChildren(
-      state.lastError
-        ? el('p', 'error', state.lastError)
-        : el('p', 'muted', '대화 기록이 없어 피드백을 만들 수 없어요.'),
-    );
+  const { voice, language, level } = state.options;
+  setPhoto($('.report-photo'), voice);
+  $('#feedback-meta').textContent = `${capitalize(voice)} · ${LANGUAGE_LABELS[language]} ${LEVEL_LABELS[level]} · ${topicLabel(state.options)}`;
+  $('#report-title').textContent = userTurns
+    ? `${formatDuration(duration)} 동안 대화했어요`
+    : state.lastError ? '통화가 연결되지 않았어요' : '통화가 끝났어요';
+  $('#again-btn-label').textContent = `${capitalize(voice)}에게 다시 걸기`;
+  $('#metrics').hidden = !userTurns;
+  $('#metric-turns').textContent = `${userTurns}번`;
+  $('#metric-fixes').textContent = '–';
+  $('#metric-expressions').textContent = '–';
+  renderTranscript(turns);
+  showScreen('feedback');
+
+  if (!userTurns) {
+    const message = state.lastError ?? '대화 기록이 없어서 리포트를 만들 수 없어요.\n다음엔 튜터에게 한두 마디라도 건네 보세요.';
+    $('#feedback-body').replaceChildren(el('p', state.lastError ? 'report-note error' : 'report-note', message));
     return;
   }
+  loadFeedback();
+}
+
+async function loadFeedback() {
+  const token = ++state.feedbackToken;
+  const body = $('#feedback-body');
+  const loading = el('div', 'report-loading');
+  loading.append(el('div', 'spinner'), el('b', null, '튜터가 대화를 다시 듣고 있어요'), el('span', null, '고칠 문장과 오늘의 표현을 정리하는 중이에요. 15~20초 걸려요.'));
+  body.replaceChildren(loading);
 
   try {
     const res = await fetch('/api/feedback', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ language: state.options.language, level: state.options.level, transcript: turns }),
+      body: JSON.stringify({ language: state.options.language, level: state.options.level, transcript: state.feedbackTurns }),
     });
     if (!res.ok) throw new Error((await res.json()).error);
-    renderFeedback(await res.json());
+    const feedback = await res.json();
+    if (token !== state.feedbackToken) return;
+    renderFeedback(feedback);
   } catch (err) {
-    $('#feedback-body').innerHTML = '';
-    $('#feedback-body').append(el('p', 'muted', err.message || '피드백을 불러오지 못했어요.'));
+    if (token !== state.feedbackToken) return;
+    const retry = el('button', 'btn-plain');
+    retry.type = 'button';
+    retry.append(icon('i-retry'), '다시 시도');
+    retry.addEventListener('click', loadFeedback);
+    const note = el('div', 'report-note');
+    note.append(el('div', null, `${err.message || '리포트를 불러오지 못했어요.'}\n무료 사용량이 몰리면 가끔 이래요.`), retry);
+    body.replaceChildren(note);
   }
 }
 
@@ -268,67 +422,253 @@ function el(tag, className, text) {
   return node;
 }
 
+function icon(id) {
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.setAttribute('class', 'icon');
+  svg.setAttribute('aria-hidden', 'true');
+  const use = document.createElementNS('http://www.w3.org/2000/svg', 'use');
+  use.setAttribute('href', `#${id}`);
+  svg.append(use);
+  return svg;
+}
+
+// "Listen" button that reads a sentence aloud with the browser's own voice.
+function listenButton(text) {
+  const button = el('button', 'listen');
+  button.type = 'button';
+  button.setAttribute('aria-label', `"${text}" 듣기`);
+  button.append(icon('i-volume'));
+  if (!('speechSynthesis' in window)) button.hidden = true;
+  button.addEventListener('click', () => {
+    const wasPlaying = button.classList.contains('playing');
+    speechSynthesis.cancel();
+    for (const b of document.querySelectorAll('.listen.playing')) b.classList.remove('playing');
+    if (wasPlaying) return;
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.lang = SPEECH_LANGS[state.options.language] ?? 'en-US';
+    utterance.rate = 0.95;
+    utterance.onend = () => button.classList.remove('playing');
+    utterance.onerror = () => button.classList.remove('playing');
+    button.classList.add('playing');
+    speechSynthesis.speak(utterance);
+  });
+  return button;
+}
+
+// Word-level diff (character-level for ja/zh) via LCS, so the report can mark
+// exactly what changed between what the learner said and the better version.
+function diffTokens(said, better, language) {
+  const unspaced = UNSPACED_LANGUAGES.has(language);
+  const split = (s) => (unspaced ? Array.from(s) : s.split(/\s+/).filter(Boolean));
+  const norm = (w) => w.toLowerCase().replace(/[^\p{L}\p{N}']/gu, '');
+  const a = split(said);
+  const b = split(better);
+  const lcs = Array.from({ length: a.length + 1 }, () => new Array(b.length + 1).fill(0));
+  for (let i = a.length - 1; i >= 0; i--) {
+    for (let j = b.length - 1; j >= 0; j--) {
+      lcs[i][j] = norm(a[i]) === norm(b[j]) ? lcs[i + 1][j + 1] + 1 : Math.max(lcs[i + 1][j], lcs[i][j + 1]);
+    }
+  }
+  const removed = new Set();
+  const added = new Set();
+  let i = 0;
+  let j = 0;
+  while (i < a.length && j < b.length) {
+    if (norm(a[i]) === norm(b[j])) {
+      i++;
+      j++;
+    } else if (lcs[i + 1][j] >= lcs[i][j + 1]) removed.add(i++);
+    else added.add(j++);
+  }
+  while (i < a.length) removed.add(i++);
+  while (j < b.length) added.add(j++);
+  return { a, b, removed, added, joiner: unspaced ? '' : ' ' };
+}
+
+function markedSentence(className, tokens, changed, markTag, joiner) {
+  const p = el('p', className);
+  tokens.forEach((token, index) => {
+    if (index > 0 && joiner) p.append(joiner);
+    p.append(changed.has(index) ? el(markTag, null, token) : token);
+  });
+  return p;
+}
+
 function renderFeedback(fb) {
+  const { voice, language } = state.options;
   const body = $('#feedback-body');
   body.replaceChildren();
-  if (fb.summary) body.append(el('p', 'summary', fb.summary));
+  $('#metric-fixes').textContent = `${fb.corrections.length}개`;
+  $('#metric-expressions').textContent = `${fb.expressions.length}개`;
+
+  if (fb.summary) body.append(el('p', 'report-summary', fb.summary));
 
   if (fb.corrections.length) {
-    body.append(el('h3', null, '이렇게 말하면 더 자연스러워요'));
+    body.append(el('h2', 'report-h', '이렇게 말하면 더 자연스러워요'));
+    const list = el('ol', 'fixes');
     for (const c of fb.corrections) {
-      const card = el('div', 'card');
-      card.append(el('div', 'original', c.original ?? ''), el('div', 'better', c.better ?? ''), el('div', 'explain', c.explanation ?? ''));
-      body.append(card);
+      const said = String(c.original ?? '');
+      const better = String(c.better ?? '');
+      const diff = diffTokens(said, better, language);
+      const item = el('li');
+      const betterRow = el('div', 'fix-better');
+      betterRow.append(markedSentence(null, diff.b, diff.added, 'ins', diff.joiner), listenButton(better));
+      item.append(markedSentence('fix-said', diff.a, diff.removed, 'del', diff.joiner), betterRow);
+      if (c.explanation) item.append(el('p', 'fix-why', c.explanation));
+      list.append(item);
     }
+    body.append(list);
+  } else {
+    body.append(el('p', 'report-note', '이번 통화에서는 크게 고칠 문장이 없었어요.'));
   }
 
   if (fb.expressions.length) {
-    body.append(el('h3', null, '오늘의 표현'));
-    const list = el('ul', 'expressions');
+    body.append(el('h2', 'report-h', '오늘의 표현'));
+    const list = el('ul', 'phrases');
     for (const e of fb.expressions) {
-      const li = el('li');
-      li.append(el('strong', null, e.phrase ?? ''), el('span', null, e.meaning ?? ''));
-      list.append(li);
+      const item = el('li');
+      const text = el('div');
+      text.append(el('strong', null, e.phrase ?? ''), el('span', null, e.meaning ?? ''));
+      item.append(text, listenButton(e.phrase ?? ''));
+      list.append(item);
     }
     body.append(list);
   }
 
-  if (fb.encouragement) body.append(el('p', 'encourage', fb.encouragement));
+  if (fb.encouragement) {
+    const note = el('div', 'tutor-note');
+    const photo = el('span', 'photo');
+    photo.setAttribute('aria-hidden', 'true');
+    setPhoto(photo, voice);
+    note.append(photo, el('p', null, fb.encouragement));
+    body.append(note);
+  }
 }
 
 function renderTranscript(turns) {
   const box = $('#feedback-transcript');
   box.replaceChildren(...turns.map((t) => el('div', `bubble ${t.role}`, t.text)));
+  box.closest('details').hidden = turns.length === 0;
 }
 
 function capitalize(s) {
   return s.charAt(0).toUpperCase() + s.slice(1);
 }
 
-// ---------- wiring ----------
+function formatClock(sec) {
+  return `${String(Math.floor(sec / 60)).padStart(2, '0')}:${String(sec % 60).padStart(2, '0')}`;
+}
+
+function formatDuration(sec) {
+  return sec >= 60 ? `${Math.floor(sec / 60)}분 ${sec % 60}초` : `${sec}초`;
+}
+
+// ---------- setup screen ----------
+
+function renderVoices(voices) {
+  $('#voice-list').replaceChildren(...voices.map((voice, i) => {
+    const label = el('label', 'tutor');
+    const input = el('input');
+    input.type = 'radio';
+    input.name = 'voice';
+    input.value = voice;
+    input.checked = i === 0;
+    const photo = el('span', 'photo');
+    setPhoto(photo, voice);
+    const check = el('span', 'tutor-check');
+    check.append(icon('i-check'));
+    photo.append(check);
+    label.append(input, photo, el('span', 'tutor-name', capitalize(voice)), el('span', 'tutor-trait', tutorInfo(voice).trait));
+    return label;
+  }));
+}
+
+function restoreSettings() {
+  const saved = loadPref(SETTINGS_KEY);
+  if (!saved || typeof saved !== 'object') return;
+  for (const name of ['language', 'level', 'topic', 'voice', 'correction']) {
+    if (typeof saved[name] !== 'string') continue;
+    const input = document.querySelector(`#setup-form input[name="${name}"][value="${CSS.escape(saved[name])}"]`);
+    if (input) input.checked = true;
+  }
+  if (typeof saved.customTopic === 'string') $('#custom-topic').value = saved.customTopic;
+}
+
+function syncSetup() {
+  const options = readOptions();
+  const values = {
+    language: LANGUAGE_LABELS[options.language],
+    level: LEVEL_LABELS[options.level],
+    topic: topicLabel(options),
+    correction: CORRECTION_LABELS[options.correction],
+  };
+  for (const [name, value] of Object.entries(values)) $(`[data-value="${name}"]`).textContent = value ?? '';
+  $('#custom-topic-field').hidden = options.topic !== 'custom';
+  $('#call-btn-label').textContent = options.voice ? `${capitalize(options.voice)}에게 전화 걸기` : '전화 걸기';
+  $('#call-btn').disabled = !options.voice;
+}
 
 async function loadVoices() {
   const { voices } = await (await fetch('/api/config')).json();
-  $('#voice').replaceChildren(...voices.map((v) => {
-    const option = el('option', null, capitalize(v));
-    option.value = v;
-    return option;
-  }));
+  renderVoices(voices);
+  restoreSettings();
+  syncSetup();
 }
+
+// ---------- wiring ----------
+
+syncSetup();
 loadVoices();
 
 $('#setup-form').addEventListener('submit', (e) => {
   e.preventDefault();
+  if (readOptions().voice) startCall();
+});
+$('#setup-form').addEventListener('change', (e) => {
+  syncSetup();
+  const sheet = e.target.closest('dialog');
+  if (!sheet || e.target.type !== 'radio') return;
+  if (e.target.name === 'topic' && e.target.value === 'custom') {
+    $('#custom-topic').focus();
+    return;
+  }
+  // Like a native picker: choosing an option closes the sheet.
+  setTimeout(() => sheet.close(), 160);
+});
+$('#custom-topic').addEventListener('input', syncSetup);
+$('#custom-topic').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    e.target.closest('dialog').close();
+  }
+});
+for (const row of document.querySelectorAll('[data-sheet]')) {
+  row.addEventListener('click', () => $(`#sheet-${row.dataset.sheet}`).showModal());
+}
+for (const sheet of document.querySelectorAll('.sheet')) {
+  // Clicking the dimmed backdrop (outside the sheet's box) closes the sheet.
+  sheet.addEventListener('click', (e) => {
+    const box = sheet.getBoundingClientRect();
+    if (e.target === sheet && (e.clientY < box.top || e.clientX < box.left || e.clientX > box.right)) sheet.close();
+  });
+}
+for (const button of document.querySelectorAll('[data-close-sheet]')) {
+  button.addEventListener('click', () => button.closest('dialog').close());
+}
+$('#hangup-btn').addEventListener('click', endCall);
+$('#mute-btn').addEventListener('click', () => {
+  if (state.mic) setMuted(!state.mic.muted);
+});
+$('#captions-btn').addEventListener('click', () => {
+  state.captions = !state.captions;
+  savePref(CAPTIONS_KEY, state.captions);
+  applyCaptions();
+});
+$('#again-btn').addEventListener('click', () => {
+  window.speechSynthesis?.cancel();
   startCall();
 });
-$('#topic').addEventListener('change', (e) => {
-  $('#custom-topic-field').hidden = e.target.value !== 'custom';
+$('#settings-btn').addEventListener('click', () => {
+  window.speechSynthesis?.cancel();
+  showScreen('setup');
 });
-$('#hangup-btn').addEventListener('click', endCall);
-$('#mute-btn').addEventListener('click', (e) => {
-  if (!state.mic) return;
-  state.mic.muted = !state.mic.muted;
-  e.currentTarget.classList.toggle('active', state.mic.muted);
-  e.currentTarget.querySelector('span').textContent = state.mic.muted ? '음소거 해제' : '음소거';
-});
-$('#again-btn').addEventListener('click', () => showScreen('setup'));

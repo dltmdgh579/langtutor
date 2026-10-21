@@ -130,10 +130,23 @@ export class Player {
     this.itemId = null;
     this.itemStart = 0;
     this.itemQueuedSec = 0;
+    // All playback goes through an analyser so the UI can follow the tutor's voice.
+    this.analyser = ctx.createAnalyser();
+    this.analyser.fftSize = 512;
+    this.analyser.connect(ctx.destination);
+    this.levelBuffer = new Float32Array(this.analyser.fftSize);
   }
 
   get isPlaying() {
     return this.sources.size > 0;
+  }
+
+  get level() {
+    if (!this.isPlaying) return 0;
+    this.analyser.getFloatTimeDomainData(this.levelBuffer);
+    let peak = 0;
+    for (const s of this.levelBuffer) peak = Math.max(peak, Math.abs(s));
+    return peak;
   }
 
   enqueue(base64, itemId) {
@@ -144,7 +157,7 @@ export class Player {
 
     const source = this.ctx.createBufferSource();
     source.buffer = buffer;
-    source.connect(this.ctx.destination);
+    source.connect(this.analyser);
     const startAt = Math.max(this.ctx.currentTime + 0.02, this.nextTime);
     source.start(startAt);
     this.nextTime = startAt + buffer.duration;
