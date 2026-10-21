@@ -3,6 +3,7 @@ import { readFile } from 'node:fs/promises';
 import { extname, join, normalize, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { WebSocketServer } from 'ws';
+import { createAuth } from './auth.js';
 import { handleCall } from './relay.js';
 import { generateFeedback } from './feedback.js';
 import { PROVIDERS } from './providers/index.js';
@@ -24,6 +25,11 @@ const config = {
 if (!config.providerConfig.apiKey) {
   console.error(`${provider.apiKeyEnv}가 설정되지 않았습니다. .env.example을 .env로 복사하고 키를 넣어주세요.`);
   process.exit(1);
+}
+
+const auth = createAuth(process.env.APP_PASSWORD);
+if (!auth && process.env.RENDER) {
+  console.warn('APP_PASSWORD가 없어 누구나 접속해 API 키를 쓸 수 있습니다. 배포 환경에서는 설정하세요.');
 }
 
 const PUBLIC_DIR = fileURLToPath(new URL('../public/', import.meta.url));
@@ -63,6 +69,12 @@ async function readJson(req, limit = 512 * 1024) {
 }
 
 const server = createServer(async (req, res) => {
+  // Health check for the hosting platform; must not require the password.
+  if (req.url === '/healthz') {
+    res.writeHead(200).end('ok');
+    return;
+  }
+  if (auth && !auth.checkHttp(req, res)) return;
   if (req.method === 'GET' && req.url === '/api/config') {
     res.writeHead(200, { 'Content-Type': 'application/json' })
       .end(JSON.stringify({ provider: provider.id, voices: provider.voices }));
@@ -90,6 +102,10 @@ const wss = new WebSocketServer({ noServer: true, maxPayload: 1024 * 1024 });
 server.on('upgrade', (req, socket, head) => {
   if (!req.url.startsWith('/call')) {
     socket.destroy();
+    return;
+  }
+  if (auth && !auth.checkUpgrade(req)) {
+    socket.end('HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n');
     return;
   }
   wss.handleUpgrade(req, socket, head, (client) => handleCall(client, req, config));
