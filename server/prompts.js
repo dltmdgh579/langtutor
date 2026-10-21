@@ -23,8 +23,6 @@ export const TOPICS = {
   interview: 'Job interview practice: act as a friendly interviewer, ask common interview questions one at a time, and give a short tip after each answer.',
 };
 
-export const VOICES = ['ara', 'eve', 'leo', 'rex', 'sal'];
-
 const CORRECTION_STYLES = {
   gentle: 'Correct only mistakes that hurt understanding or that the learner repeats. Correct by naturally recasting the right form inside your reply (e.g. learner: "I go there yesterday" -> you: "Oh, you went there yesterday? What did you do?"). Never lecture.',
   active: 'Correct most grammar and word-choice mistakes, at most one per turn: briefly say the more natural way ("A more natural way to say that is ..."), optionally ask them to repeat it, then continue the conversation.',

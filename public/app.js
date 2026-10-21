@@ -20,6 +20,7 @@ const state = {
   turns: [],
   turnsById: new Map(),
   endedReason: null,
+  lastError: null,
 };
 
 function showScreen(name) {
@@ -31,6 +32,7 @@ function setStatus(text) {
 }
 
 function showError(message) {
+  state.lastError = message;
   const el = $('#call-error');
   el.textContent = message;
   el.hidden = false;
@@ -80,6 +82,7 @@ async function startCall() {
   state.turns = [];
   state.turnsById = new Map();
   state.endedReason = null;
+  state.lastError = null;
   state.responseActive = false;
   $('#transcript').replaceChildren();
   $('#call-error').hidden = true;
@@ -106,9 +109,9 @@ async function startCall() {
   ws.onerror = () => showError('서버에 연결하지 못했어요.');
 }
 
-async function onReady(sampleRate) {
-  state.player = new Player(state.ctx, sampleRate);
-  state.mic = new Microphone(state.ctx, sampleRate, (audio) => {
+async function onReady({ inputSampleRate, outputSampleRate }) {
+  state.player = new Player(state.ctx, outputSampleRate);
+  state.mic = new Microphone(state.ctx, inputSampleRate, (audio) => {
     send({ type: 'input_audio_buffer.append', audio });
   });
   try {
@@ -159,7 +162,7 @@ function bargeIn() {
 function handleServerEvent(event) {
   switch (event.type) {
     case 'relay.ready':
-      onReady(event.sampleRate);
+      onReady(event);
       break;
     case 'relay.error':
       showError(event.message);
@@ -232,7 +235,11 @@ async function showFeedback() {
   state.startedAt = 0;
 
   if (!turns.some((t) => t.role === 'user')) {
-    $('#feedback-body').innerHTML = '<p class="muted">대화 기록이 없어 피드백을 만들 수 없어요.</p>';
+    $('#feedback-body').replaceChildren(
+      state.lastError
+        ? el('p', 'error', state.lastError)
+        : el('p', 'muted', '대화 기록이 없어 피드백을 만들 수 없어요.'),
+    );
     return;
   }
 
@@ -295,6 +302,16 @@ function capitalize(s) {
 }
 
 // ---------- wiring ----------
+
+async function loadVoices() {
+  const { voices } = await (await fetch('/api/config')).json();
+  $('#voice').replaceChildren(...voices.map((v) => {
+    const option = el('option', null, capitalize(v));
+    option.value = v;
+    return option;
+  }));
+}
+loadVoices();
 
 $('#setup-form').addEventListener('submit', (e) => {
   e.preventDefault();
