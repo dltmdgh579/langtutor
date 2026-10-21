@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>LangTutor · 원어민 전화 튜터</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <main class="phone">
+    <!-- 1. 설정 화면 -->
+    <section class="screen" data-screen="setup">
+      <header class="brand">
+        <h1>LangTutor</h1>
+        <p>원어민 튜터와 바로 전화 수업을 시작해보세요.</p>
+      </header>
+
+      <form id="setup-form">
+        <label class="field">
+          <span>배울 언어</span>
+          <select name="language">
+            <option value="en" selected>영어 English</option>
+            <option value="ja">일본어 日本語</option>
+            <option value="zh">중국어 中文</option>
+            <option value="es">스페인어 Español</option>
+            <option value="fr">프랑스어 Français</option>
+            <option value="de">독일어 Deutsch</option>
+          </select>
+        </label>
+
+        <fieldset class="field">
+          <legend>내 수준</legend>
+          <div class="segmented">
+            <label><input type="radio" name="level" value="beginner" /><span>초급</span></label>
+            <label><input type="radio" name="level" value="intermediate" checked /><span>중급</span></label>
+            <label><input type="radio" name="level" value="advanced" /><span>고급</span></label>
+          </div>
+        </fieldset>
+
+        <label class="field">
+          <span>대화 주제</span>
+          <select name="topic" id="topic">
+            <option value="free" selected>자유 대화</option>
+            <option value="daily">일상 · 취미</option>
+            <option value="travel">여행 상황극</option>
+            <option value="business">비즈니스</option>
+            <option value="interview">면접 연습</option>
+            <option value="custom">직접 입력</option>
+          </select>
+        </label>
+
+        <label class="field" id="custom-topic-field" hidden>
+          <span>어떤 이야기를 하고 싶나요?</span>
+          <input name="customTopic" maxlength="200" placeholder="예: 최근 본 영화, 이직 고민" />
+        </label>
+
+        <label class="field">
+          <span>튜터</span>
+          <select name="voice">
+            <option value="eve" selected>Eve</option>
+            <option value="ara">Ara</option>
+            <option value="leo">Leo</option>
+            <option value="rex">Rex</option>
+            <option value="sal">Sal</option>
+          </select>
+        </label>
+
+        <fieldset class="field">
+          <legend>교정 방식</legend>
+          <div class="segmented">
+            <label><input type="radio" name="correction" value="gentle" checked /><span>자연스럽게</span></label>
+            <label><input type="radio" name="correction" value="active" /><span>적극적으로</span></label>
+          </div>
+        </fieldset>
+
+        <button type="submit" class="call-btn">📞 전화 걸기</button>
+        <p class="hint">이어폰을 쓰면 튜터 목소리가 마이크로 다시 들어가지 않아 더 매끄러워요.</p>
+      </form>
+    </section>
+
+    <!-- 2. 통화 화면 -->
+    <section class="screen" data-screen="call" hidden>
+      <div class="caller">
+        <div class="avatar-wrap">
+          <div id="mic-ring" class="mic-ring"></div>
+          <div id="avatar" class="avatar">🎧</div>
+        </div>
+        <h2 id="tutor-name">Eve</h2>
+        <p id="tutor-lang" class="muted">영어 튜터</p>
+        <p id="call-timer" class="timer">00:00</p>
+        <p id="call-status" class="status">연결 중…</p>
+      </div>
+
+      <p id="call-error" class="error" hidden></p>
+      <div id="transcript" class="transcript" aria-live="polite"></div>
+
+      <div class="controls">
+        <button id="mute-btn" class="round" type="button">🎙️<span>음소거</span></button>
+        <button id="hangup-btn" class="round hangup" type="button">📵<span>끊기</span></button>
+      </div>
+    </section>
+
+    <!-- 3. 통화 후 피드백 -->
+    <section class="screen" data-screen="feedback" hidden>
+      <header class="brand">
+        <h1>수업 리포트</h1>
+        <p id="feedback-meta" class="muted"></p>
+      </header>
+      <div id="feedback-body"></div>
+      <details class="full-transcript">
+        <summary>전체 대화 보기</summary>
+        <div id="feedback-transcript" class="transcript static"></div>
+      </details>
+      <button id="again-btn" class="call-btn" type="button">다시 전화하기</button>
+    </section>
+  </main>
+
+  <script type="module" src="/app.js"></script>
+</body>
+</html>
