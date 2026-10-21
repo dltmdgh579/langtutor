@@ -1,0 +1,23 @@
+# Render Blueprint: Render 대시보드 → New → Blueprint 에서 이 저장소를 고르면
+# 아래 설정으로 웹 서비스가 만들어집니다. sync: false 항목은 생성할 때 직접 입력합니다.
+services:
+  - type: web
+    name: langtutor
+    runtime: node
+    plan: free
+    region: singapore
+    branch: main
+    buildCommand: npm ci
+    startCommand: npm start
+    healthCheckPath: /healthz
+    envVars:
+      - key: NODE_VERSION
+        value: "22.12.0"
+      - key: VOICE_PROVIDER
+        value: gemini
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: APP_PASSWORD
+        sync: false
+      - key: MAX_CALL_MINUTES
+        value: "10"

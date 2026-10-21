@@ -38,6 +38,31 @@ Grok으로 바꾸려면 `.env`에서 `VOICE_PROVIDER=grok`으로 바꾸고 `XAI_
 
 마이크 권한 때문에 `localhost` 또는 HTTPS에서만 동작합니다. 이어폰을 쓰면 튜터 목소리가 마이크로 다시 들어가지 않아 더 매끄럽습니다.
 
+## 배포 (Render 무료)
+
+저장소의 `render.yaml`(Blueprint)에 설정이 들어 있어서, 대시보드에서 몇 번만 누르면 됩니다.
+
+1. https://render.com 에 GitHub 계정으로 가입
+2. **New → Blueprint** → 이 저장소 선택 (Render GitHub 앱에 저장소 접근 권한을 주라고 나오면 허용)
+3. 입력란이 나오면 채우기
+   - `GEMINI_API_KEY`: Gemini 키
+   - `APP_PASSWORD`: 접속 비밀번호 (직접 정하기)
+4. **Deploy Blueprint** → 몇 분 뒤 `https://langtutor-xxxx.onrender.com` 주소가 생김
+
+처음 접속하면 브라우저가 아이디/비밀번호를 묻습니다. 아이디는 아무거나, 비밀번호는 `APP_PASSWORD` 값을 넣으면 30일 동안 다시 묻지 않아요.
+이후 `main`에 push하면 자동으로 다시 배포됩니다.
+
+| 항목 | 값 |
+| --- | --- |
+| 리전 | 싱가포르 |
+| 최대 통화 시간 | 10분 (`MAX_CALL_MINUTES`) |
+| 상태 확인 | `/healthz` (비밀번호 없이 열림) |
+
+무료 플랜 주의점:
+- 15분 동안 접속이 없으면 서버가 잠들고, 다음 접속 때 켜지는 데 약 1분 걸려요. 잠들지 않게 하려면 Starter(월 $7)로 바꾸면 됩니다.
+- 통화 1분에 서버가 내보내는 트래픽이 약 4~5MB예요. 무료 트래픽 한도를 넘지 않는지 Render 대시보드에서 확인하세요.
+- `APP_PASSWORD`를 비워두면 주소를 아는 누구나 내 API 키로 통화할 수 있어요.
+
 ## 구조
 
 ```
@@ -79,6 +104,7 @@ API 키는 서버에만 있고, 브라우저는 오디오 전송(`input_audio_bu
 | `XAI_TEXT_MODEL` | `grok-4-1-fast-non-reasoning` | 통화 후 리포트용 |
 | `MAX_CALL_MINUTES` | `15` | 한 통화 최대 길이 (비용 방지, Gemini 음성 세션 한도도 15분) |
 | `PORT` | `3000` | |
+| `APP_PASSWORD` | (없음) | 설정하면 접속할 때 비밀번호를 물음. 배포 시 필수 |
 
 ## 튜닝 포인트
 
