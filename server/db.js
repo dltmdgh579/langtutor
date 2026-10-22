@@ -113,6 +113,55 @@ export async function createDb(connectionString) {
       await pool.query('update calls set feedback = $2 where id = $1', [callId, feedback]);
     },
 
+    // Records a payment and adds its time in one statement. A transaction
+    // already recorded changes nothing, so redelivered webhooks are harmless.
+    // Returns whether it was new and whether an account got the time.
+    async creditPayment({ transactionId, userId, seconds, amount, currency }) {
+      const { rows } = await pool.query(
+        `with p as (
+           insert into payments (paddle_transaction_id, user_id, seconds, amount, currency)
+           values ($1, (select id from users where id = $2), $3, $4, $5)
+           on conflict (paddle_transaction_id) do nothing
+           returning user_id, seconds
+         ), u as (
+           update users set balance_seconds = balance_seconds + p.seconds from p
+           where users.id = p.user_id returning users.id
+         )
+         select (select count(*) from p)::int as inserted, (select count(*) from u)::int as credited`,
+        [transactionId, isId(userId) ? userId : null, seconds, amount, currency],
+      );
+      return { inserted: rows[0].inserted > 0, credited: rows[0].credited > 0 };
+    },
+
+    // Takes back a refunded payment's time: all of it for a full refund, the
+    // refunded share for a partial one, never more than is left unrevoked.
+    // Time already spent can't be taken back below zero.
+    async revokePayment({ adjustmentId, transactionId, action, amount }) {
+      const { rows } = await pool.query(
+        `with pay as (
+           select p.id, p.user_id, p.amount,
+             p.seconds - coalesce((select sum(seconds) from payment_adjustments where payment_id = p.id), 0) as unrevoked,
+             p.seconds
+           from payments p where p.paddle_transaction_id = $2
+         ), a as (
+           insert into payment_adjustments (paddle_adjustment_id, payment_id, action, seconds)
+           select $1, pay.id, $3, greatest(least(pay.unrevoked,
+             case when pay.amount <= 0 or $4::bigint >= pay.amount then pay.seconds
+                  else ceil(pay.seconds * $4::numeric / pay.amount)::int end), 0)
+           from pay
+           on conflict (paddle_adjustment_id) do nothing
+           returning seconds
+         ), u as (
+           update users set balance_seconds = greatest(balance_seconds - a.seconds, 0) from a, pay
+           where users.id = pay.user_id returning users.id
+         )
+         select (select count(*) from pay)::int as found, (select count(*) from a)::int as applied,
+           (select seconds from a) as seconds`,
+        [adjustmentId, transactionId, action, amount],
+      );
+      return { found: rows[0].found > 0, applied: rows[0].applied > 0, seconds: rows[0].seconds };
+    },
+
     close: () => pool.end(),
   };
 }

@@ -674,9 +674,12 @@ function renderAccount() {
     $('#account-balance').textContent = formatBalance(balance);
   }
   $('#call-note').textContent = outOfTime()
-    ? '남은 통화 시간이 없어요. 시간이 충전되면 다시 걸 수 있어요.'
+    ? (state.config.payments
+      ? '남은 통화 시간이 없어요. 오른쪽 위 내 계정에서 충전할 수 있어요.'
+      : '남은 통화 시간이 없어요. 시간이 충전되면 다시 걸 수 있어요.')
     : '이어폰을 끼면 튜터 목소리가 마이크로 다시 들어가지 않아요';
   $('#again-btn').disabled = outOfTime();
+  if (user && state.config.payments) renderPacks();
   syncSetup();
 }
 
@@ -693,16 +696,20 @@ async function refreshUser() {
   renderAccount();
 }
 
-function loadGoogleScript() {
-  if (window.google?.accounts) return Promise.resolve();
+function loadScript(src) {
   return new Promise((resolve, reject) => {
     const script = document.createElement('script');
-    script.src = 'https://accounts.google.com/gsi/client';
+    script.src = src;
     script.async = true;
     script.onload = resolve;
     script.onerror = reject;
     document.head.append(script);
   });
+}
+
+function loadGoogleScript() {
+  if (window.google?.accounts) return Promise.resolve();
+  return loadScript('https://accounts.google.com/gsi/client');
 }
 
 async function showLogin() {
@@ -766,6 +773,92 @@ async function logout() {
   state.user = null;
   renderAccount();
   showLogin();
+}
+
+// ---------- payments ----------
+
+// The time arrives with Paddle's webhook, usually a few seconds after paying.
+const CREDIT_POLL_MS = 2000;
+const CREDIT_WAIT_MS = 60_000;
+
+let paddleReady = null;
+function initPaddle() {
+  const { payments } = state.config;
+  paddleReady ??= loadScript('https://cdn.paddle.com/paddle/v2/paddle.js').then(() => {
+    if (payments.environment === 'sandbox') Paddle.Environment.set('sandbox');
+    Paddle.Initialize({
+      token: payments.clientToken,
+      checkout: { settings: { displayMode: 'overlay', locale: 'ko' } },
+      eventCallback: (event) => {
+        if (event.name === 'checkout.completed') waitForCredit();
+      },
+    });
+  });
+  // Let a later attempt retry a script that failed to load.
+  paddleReady.catch(() => { paddleReady = null; });
+  return paddleReady;
+}
+
+function setPayNote(text) {
+  $('#pay-note').textContent = text;
+}
+
+// Pack buttons, with prices localized by Paddle for the buyer's country.
+async function renderPacks() {
+  if ($('#pack-list').childElementCount) return;
+  const { packs } = state.config.payments;
+  $('#account-packs').hidden = false;
+  const priceLabels = new Map();
+  $('#pack-list').replaceChildren(...packs.map((pack) => {
+    const button = el('button', 'pack', `${pack.minutes}분`);
+    button.type = 'button';
+    const price = el('span');
+    priceLabels.set(pack.priceId, price);
+    button.append(price);
+    button.addEventListener('click', () => buyPack(pack));
+    return button;
+  }));
+  try {
+    await initPaddle();
+    const preview = await Paddle.PricePreview({ items: packs.map((pack) => ({ priceId: pack.priceId, quantity: 1 })) });
+    for (const item of preview.data.details.lineItems) {
+      const label = priceLabels.get(item.price.id);
+      if (label) label.textContent = item.formattedTotals.total;
+    }
+  } catch {
+    setPayNote('가격을 불러오지 못했어요. 결제는 그대로 할 수 있어요.');
+  }
+}
+
+async function buyPack(pack) {
+  setPayNote('');
+  try {
+    await initPaddle();
+  } catch {
+    setPayNote('결제창을 불러오지 못했어요. 네트워크를 확인하고 다시 시도해주세요.');
+    return;
+  }
+  // A modal sheet stays above everything else, so the checkout would open behind it.
+  $('#sheet-account').close();
+  Paddle.Checkout.open({
+    items: [{ priceId: pack.priceId, quantity: 1 }],
+    ...(state.user.email && { customer: { email: state.user.email } }),
+    customData: { userId: state.user.id },
+  });
+}
+
+async function waitForCredit() {
+  const before = state.user?.balanceSeconds ?? 0;
+  setPayNote('결제를 확인하고 있어요…');
+  for (const until = Date.now() + CREDIT_WAIT_MS; Date.now() < until;) {
+    await new Promise((resolve) => setTimeout(resolve, CREDIT_POLL_MS));
+    await refreshUser();
+    if ((state.user?.balanceSeconds ?? 0) > before) {
+      setPayNote('충전됐어요.');
+      return;
+    }
+  }
+  setPayNote('결제는 완료됐는데 충전이 늦어지고 있어요. 잠시 후 새로고침해 보세요.');
 }
 
 async function init() {

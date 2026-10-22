@@ -81,6 +81,27 @@ npm run grant -- someone@gmail.com -10   # 10분 회수
 update users set balance_seconds = balance_seconds + 30 * 60 where email = 'someone@gmail.com';
 ```
 
+### 3. 결제 (Paddle, 선택)
+
+통화 시간을 충전권(예: 60분, 300분)으로 팔아요. Paddle이 대리 판매자(Merchant of Record)라 카드 정보, 구매자 부가세, 영수증은 Paddle이 처리해요. 개발은 **샌드박스**(https://sandbox-vendors.paddle.com, 심사 없음)에서 하고, 실결제는 운영 계정 심사를 통과한 뒤 키만 바꾸면 돼요.
+
+1. **Catalog → Products**에서 상품(예: "통화 시간 60분")을 만들고 **일회성(one-time) 가격**을 추가 → 가격 ID(`pri_…`)
+2. `PADDLE_PRICES`에 `가격ID:분`을 쉼표로 이어서 넣기. 예) `pri_01abc:60,pri_01def:300`
+3. **Developer tools → Authentication → Client-side tokens**에서 토큰 발급 → `PADDLE_CLIENT_TOKEN`
+4. **Developer tools → Notifications → New destination**
+   - URL: `https://<배포 주소>/api/paddle/webhook`
+   - 이벤트: `transaction.completed`, `adjustment.created`, `adjustment.updated`
+   - 만든 뒤 보이는 **Secret key** → `PADDLE_WEBHOOK_SECRET`
+5. **Checkout → Checkout settings**의 기본 결제 링크(Default payment link)에 서비스 주소 넣기 (없으면 결제창이 열리지 않아요)
+
+동작 방식:
+- 내 계정 시트의 충전 버튼이 Paddle 결제창(overlay)을 열고, 결제에 계정 ID를 `customData`로 실어 보내요.
+- 시간은 브라우저가 아니라 **서명이 확인된 웹훅**(`transaction.completed`)으로만 충전돼요. 같은 거래가 다시 와도 한 번만 반영돼요(`payments` 테이블).
+- 환불·차지백이 승인되면(`adjustment.*`) 그 결제로 준 시간을 회수해요. 부분 환불은 금액 비율만큼, 이미 쓴 시간은 0 아래로 빼지 않아요.
+- 결제됐는데 계정을 못 찾으면 서버 로그에 `grant … by hand`가 남아요. `payments`에 `user_id`가 비어 있는 행을 보고 `npm run grant`로 지급하세요.
+
+로컬에서 웹훅을 받으려면 ngrok 같은 터널이 필요해요. 샌드박스 카드 번호는 `4242 4242 4242 4242`(만료일은 미래, CVC 아무 숫자)예요.
+
 ## 배포 (Render)
 
 저장소의 `render.yaml`(Blueprint)에 설정이 들어 있어서, 대시보드에서 몇 번만 누르면 됩니다.
@@ -115,6 +136,7 @@ server/
   auth.js      Google ID 토큰 검증, 세션 쿠키
   db.js        Postgres(계정·세션·통화 기록). DATABASE_URL이 없으면 메모리에 통화만 보관
   schema.sql   테이블 정의 (서버 시작 시 자동 적용)
+  payments.js  Paddle 웹훅 서명 검증, 결제 시 충전·환불 시 회수
   relay.js     브라우저 ↔ 음성 제공자 중계. 세션 설정(프롬프트·목소리·VAD)은 서버에서만. 대화 기록과 과금 시간 집계
   prompts.js   튜터 페르소나 / 피드백 프롬프트
   feedback.js  통화 후 리포트 생성
@@ -160,6 +182,10 @@ API 키는 서버에만 있고, 브라우저는 오디오 전송(`input_audio_bu
 | `GOOGLE_CLIENT_ID` | (없음) | Google OAuth 웹 클라이언트 ID. 배포 시 필수 |
 | `DATABASE_URL` | (없음) | Postgres 연결 문자열. 배포 시 필수 (`GOOGLE_CLIENT_ID`와 함께) |
 | `FREE_TRIAL_MINUTES` | `10` | 새 계정에 주는 무료 통화 시간(분) |
+| `PADDLE_ENV` | `sandbox` | `sandbox` 또는 `production` |
+| `PADDLE_CLIENT_TOKEN` | (없음) | Paddle 클라이언트 토큰 (브라우저용, 공개돼도 됨) |
+| `PADDLE_WEBHOOK_SECRET` | (없음) | 웹훅 서명 검증 키 |
+| `PADDLE_PRICES` | (없음) | `가격ID:분` 목록. 예) `pri_01abc:60,pri_01def:300` |
 
 ## 튜닝 포인트
 
@@ -170,7 +196,6 @@ API 키는 서버에만 있고, 브라우저는 오디오 전송(`input_audio_bu
 ## 다음 단계 아이디어
 
 - 지난 수업 목록 화면, 자주 틀리는 표현 누적 복습 (기록은 이미 `calls` 테이블에 쌓이고 있음)
-- 결제(토스페이먼츠·포트원)로 통화 시간 충전
 - 예약 시간에 튜터가 먼저 전화 걸기 (Twilio 등 전화망 연동 — Grok API는 G.711 μ-law 8kHz도 지원)
 - 수업 종료 1분 전 튜터가 자연스럽게 마무리하도록 안내
 - 레벨 테스트 후 수준 자동 설정

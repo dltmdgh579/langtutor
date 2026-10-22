@@ -36,3 +36,29 @@ create table if not exists calls (
   feedback jsonb
 );
 create index if not exists calls_user_started on calls(user_id, started_at desc);
+
+-- One row per completed Paddle transaction; the unique id makes a redelivered
+-- webhook a no-op. user_id is null when the checkout named no known account
+-- (the time then has to be granted by hand).
+create table if not exists payments (
+  id bigserial primary key,
+  paddle_transaction_id text not null unique,
+  user_id bigint references users(id) on delete set null,
+  seconds integer not null check (seconds >= 0),
+  -- Paddle's total including tax, in the currency's lowest unit.
+  amount bigint not null,
+  currency text not null,
+  created_at timestamptz not null default now()
+);
+create index if not exists payments_user_id on payments(user_id);
+
+-- Approved refunds and chargebacks, and the time they took back.
+create table if not exists payment_adjustments (
+  id bigserial primary key,
+  paddle_adjustment_id text not null unique,
+  payment_id bigint not null references payments(id),
+  action text not null,
+  seconds integer not null check (seconds >= 0),
+  created_at timestamptz not null default now()
+);
+create index if not exists payment_adjustments_payment_id on payment_adjustments(payment_id);
