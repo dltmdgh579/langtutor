@@ -69,11 +69,10 @@ function createTranscript() {
 
 // limitSeconds (counted from the tutor picking up, like billing) cuts the call
 // off, reported to the browser as limitReason; onEnd receives the billed
-// seconds and transcript exactly once.
+// seconds and transcript exactly once. It doesn't throw: a call that fails to
+// start ends as 'start_failed'.
 export function handleCall(client, { options, callId, limitSeconds, limitReason, onEnd }, { provider, providerConfig }) {
-  const { url, headers } = provider.connection(providerConfig);
-  const upstream = new WebSocket(url, { headers });
-
+  let upstream = null;
   let ready = false;
   let closed = false;
   let answeredAt = 0;
@@ -85,7 +84,7 @@ export function handleCall(client, { options, callId, limitSeconds, limitReason,
     if (client.readyState === WebSocket.OPEN) client.send(JSON.stringify(event));
   };
   const sendUpstream = (event) => {
-    if (upstream.readyState === WebSocket.OPEN) upstream.send(JSON.stringify(event));
+    if (upstream?.readyState === WebSocket.OPEN) upstream.send(JSON.stringify(event));
   };
 
   let limitTimer = setTimeout(() => {
@@ -101,29 +100,41 @@ export function handleCall(client, { options, callId, limitSeconds, limitReason,
     const billedSeconds = answeredAt ? Math.ceil((Date.now() - answeredAt) / 1000) : 0;
     console.log(`${tag} end: ${reason} (${billedSeconds}s)`);
     sendClient({ type: 'relay.ended', reason });
-    upstream.close();
+    upstream?.close();
     client.close();
     onEnd({ billedSeconds, reason, transcript: transcript.toJSON() });
   }
 
-  const session = provider.createSession({
-    options,
-    instructions: buildTutorInstructions(options),
-    config: providerConfig,
-    sendUpstream,
-    emit: (event) => {
-      if (event.type === 'error') console.warn(`${tag} upstream error`, event.error ?? event);
-      transcript.record(event);
-      sendClient(event);
-    },
-    ready: ({ inputSampleRate, outputSampleRate }) => {
-      ready = true;
-      answeredAt = Date.now();
-      clearTimeout(limitTimer);
-      limitTimer = setTimeout(() => hangUp(limitReason), limitSeconds * 1000);
-      sendClient({ type: 'relay.ready', inputSampleRate, outputSampleRate, voice: options.voice, callId });
-    },
-  });
+  // The upstream socket is opened last and gets its listeners straight away,
+  // so a setup error can't leave it (or the connect timer) running unattended.
+  let session;
+  try {
+    session = provider.createSession({
+      options,
+      instructions: buildTutorInstructions(options),
+      config: providerConfig,
+      sendUpstream,
+      emit: (event) => {
+        if (event.type === 'error') console.warn(`${tag} upstream error`, event.error ?? event);
+        transcript.record(event);
+        sendClient(event);
+      },
+      ready: ({ inputSampleRate, outputSampleRate }) => {
+        ready = true;
+        answeredAt = Date.now();
+        clearTimeout(limitTimer);
+        limitTimer = setTimeout(() => hangUp(limitReason), limitSeconds * 1000);
+        sendClient({ type: 'relay.ready', inputSampleRate, outputSampleRate, voice: options.voice, callId });
+      },
+    });
+    const { url, headers } = provider.connection(providerConfig);
+    upstream = new WebSocket(url, { headers });
+  } catch (err) {
+    console.error(`${tag} failed to start:`, err.message);
+    sendClient({ type: 'relay.error', message: '통화를 시작하지 못했어요. 잠시 후 다시 걸어주세요.' });
+    hangUp('start_failed');
+    return { hangUp };
+  }
 
   upstream.on('open', () => session.onOpen());
 

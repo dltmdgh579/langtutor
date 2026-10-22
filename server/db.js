@@ -10,6 +10,13 @@ import pg from 'pg';
 // calls the old instance is still serving.
 const ORPHAN_CALL_AGE = '2 hours';
 
+// Without these a stalled connection (e.g. Neon waking up, a network drop)
+// waits forever, so saving a call never retries and redials hang behind it.
+// The query limit is enforced by the client: a server-side statement_timeout
+// would be a startup parameter, which Neon's pooled endpoint (PgBouncer) rejects.
+const CONNECT_TIMEOUT_MS = 5_000;
+const QUERY_TIMEOUT_MS = 5_000;
+
 const isId = (value) => typeof value === 'string' && /^\d{1,18}$/.test(value);
 
 function toUser(row) {
@@ -23,7 +30,12 @@ function toUser(row) {
 }
 
 export async function createDb(connectionString) {
-  const pool = new pg.Pool({ connectionString, max: 5 });
+  const pool = new pg.Pool({
+    connectionString,
+    max: 5,
+    connectionTimeoutMillis: CONNECT_TIMEOUT_MS,
+    query_timeout: QUERY_TIMEOUT_MS,
+  });
   pool.on('error', (err) => console.error('db pool error:', err.message));
   await pool.query(await readFile(new URL('./schema.sql', import.meta.url), 'utf8'));
   await pool.query(
@@ -74,12 +86,14 @@ export async function createDb(connectionString) {
       return String(rows[0].id);
     },
 
-    // Records the end of a call and deducts its time in one statement.
+    // Records the end of a call and deducts its time in one statement. Only
+    // the first save counts: a retry after a timed-out attempt that did commit
+    // must not deduct twice.
     async finishCall(callId, { billedSeconds, reason, transcript }) {
       await pool.query(
         `with c as (
            update calls set ended_at = now(), end_reason = $2, billed_seconds = $3, transcript = $4
-           where id = $1 returning user_id
+           where id = $1 and ended_at is null returning user_id
          )
          update users set balance_seconds = greatest(balance_seconds - $3, 0) from c where users.id = c.user_id`,
         [callId, reason, billedSeconds, JSON.stringify(transcript)],

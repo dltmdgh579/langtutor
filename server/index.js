@@ -304,19 +304,13 @@ async function startCall(client, req, user) {
 
   const maxSeconds = config.maxCallMinutes * 60;
   const limitSeconds = Math.min(maxSeconds, user.balanceSeconds);
-  try {
-    ({ hangUp: call.hangUp } = handleCall(client, {
-      options,
-      callId: call.id,
-      limitSeconds,
-      limitReason: limitSeconds < maxSeconds ? 'out_of_minutes' : 'max_duration',
-      onEnd,
-    }, config));
-  } catch (err) {
-    console.error(`[call ${call.id}] failed to start:`, err.message);
-    onEnd({ billedSeconds: 0, reason: 'start_failed', transcript: [] });
-    refuse('통화를 시작하지 못했어요. 잠시 후 다시 걸어주세요.');
-  }
+  ({ hangUp: call.hangUp } = handleCall(client, {
+    options,
+    callId: call.id,
+    limitSeconds,
+    limitReason: limitSeconds < maxSeconds ? 'out_of_minutes' : 'max_duration',
+    onEnd,
+  }, config));
 }
 
 const wss = new WebSocketServer({ noServer: true, maxPayload: 1024 * 1024 });
