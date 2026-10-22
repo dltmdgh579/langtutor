@@ -353,5 +353,5 @@ process.once('SIGINT', () => shutdown('SIGINT'));
 
 server.listen(config.port, () => {
   const login = auth.enabled ? 'Google 로그인' : '로그인 없음(로컬 개발)';
-  console.log(`LangTutor running at http://localhost:${config.port} (${provider.id}: ${config.providerConfig.voiceModel}, ${login})`);
+  console.log(`Rinrin running at http://localhost:${config.port} (${provider.id}: ${config.providerConfig.voiceModel}, ${login})`);
 });

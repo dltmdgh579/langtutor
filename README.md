@@ -1,4 +1,4 @@
-# LangTutor — 원어민 전화 튜터 MVP
+# Rinrin — 원어민 전화 튜터 MVP
 
 실시간 음성 AI로 만든 "외국인 튜터와 전화 영어" 스타일 MVP입니다.
 음성 엔진은 `.env`의 `VOICE_PROVIDER` 하나로 바꿀 수 있어요.
