@@ -355,6 +355,10 @@ function endCall() {
   if (!state.ws) return;
   const ws = state.ws;
   state.ws = null;
+  // Read the balance once the server has seen the hang-up and billed the call;
+  // asking straight away can still return the old one.
+  if (ws.readyState === WebSocket.CLOSED) refreshUser();
+  else ws.addEventListener('close', refreshUser, { once: true });
   ws.close();
   clearInterval(state.timer);
   cancelAnimationFrame(state.rafId);
@@ -393,7 +397,6 @@ function showFeedback() {
   $('#metric-expressions').textContent = '–';
   renderTranscript(turns);
   showScreen('feedback');
-  refreshUser();
 
   if (!userTurns) {
     const message = state.lastError ?? '대화 기록이 없어서 리포트를 만들 수 없어요.\n다음엔 튜터에게 한두 마디라도 건네 보세요.';
