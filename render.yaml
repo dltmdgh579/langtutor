@@ -7,7 +7,9 @@ services:
     plan: free
     region: singapore
     branch: main
-    buildCommand: npm ci
+    # 배포에 필요 없는 요청(보안 검사·npm 버전 확인)을 빼고, 멈춘 요청은 기본 5분 대신
+    # 30초 만에 재시도합니다. --loglevel=http 로 요청별 소요 시간이 빌드 로그에 남습니다.
+    buildCommand: npm ci --no-audit --no-fund --no-update-notifier --fetch-timeout=30000 --loglevel=http
     startCommand: npm start
     healthCheckPath: /healthz
     envVars:
