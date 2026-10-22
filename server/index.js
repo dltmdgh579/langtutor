@@ -55,7 +55,6 @@ const callsByUser = new Map(); // one per account at a time
 const callsById = new Map();
 // Reports being generated, so a retry doesn't pay for a second one: 'user:call' -> promise.
 const pendingFeedback = new Map();
-let shuttingDown = false;
 
 // The browser asks for its report right after hanging up, possibly before the
 // server has seen the hang-up, so allow the call a moment to end.
@@ -257,10 +256,6 @@ async function startCall(client, req, user) {
     client.send(JSON.stringify({ type: 'relay.error', message }));
     client.close();
   };
-  if (shuttingDown) {
-    refuse('서버를 업데이트하는 중이에요. 잠시 후 다시 걸어주세요.');
-    return;
-  }
 
   // A redial right after hanging up: wait for the last call's deduction so
   // this one starts from the real balance.
@@ -306,11 +301,6 @@ async function startCall(client, req, user) {
     call.live = false;
     saveCall(call.id, result).finally(forget);
   };
-  if (shuttingDown) {
-    onEnd({ billedSeconds: 0, reason: 'server_shutdown', transcript: [] });
-    refuse('서버를 업데이트하는 중이에요. 잠시 후 다시 걸어주세요.');
-    return;
-  }
 
   const maxSeconds = config.maxCallMinutes * 60;
   const limitSeconds = Math.min(maxSeconds, user.balanceSeconds);
@@ -356,13 +346,11 @@ server.on('upgrade', async (req, socket, head) => {
 // Hosting platforms stop the old instance on every deploy: end its calls
 // first so they're billed and their transcripts saved.
 async function shutdown(signal) {
-  shuttingDown = true;
-  const calls = [...callsByUser.values()];
+  const calls = [...callsByUser.values()].filter((call) => call.hangUp);
   console.log(`${signal}: ending ${calls.length} call(s)`);
   server.close();
-  for (const call of calls) call.hangUp?.('server_shutdown');
-  // Calls still starting see shuttingDown and end themselves.
-  await Promise.allSettled([...calls.map((call) => call.saved), ...pendingFeedback.values()]);
+  for (const call of calls) call.hangUp('server_shutdown');
+  await Promise.allSettled(calls.map((call) => call.saved));
   await db.close();
   process.exit(0);
 }
