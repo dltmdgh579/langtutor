@@ -8,12 +8,15 @@
   "scripts": {
     "start": "node --env-file-if-exists=.env server/index.js",
     "dev": "node --watch --env-file-if-exists=.env server/index.js",
-    "gemini:models": "node --env-file-if-exists=.env scripts/list-gemini-models.js"
+    "gemini:models": "node --env-file-if-exists=.env scripts/list-gemini-models.js",
+    "grant": "node --env-file-if-exists=.env scripts/grant-minutes.js"
   },
   "engines": {
     "node": ">=22.9"
   },
   "dependencies": {
+    "jose": "^6.2.13",
+    "pg": "^8.23.1",
     "ws": "^8.18.0"
   }
 }

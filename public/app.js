@@ -34,6 +34,13 @@ const TUTORS = {
 };
 const DEFAULT_TUTOR = { trait: '원어민 튜터', tile: '#e5e8eb' };
 
+// Why the server ended a call, shown under the report title.
+const ENDED_MESSAGES = {
+  out_of_minutes: () => '남은 통화 시간을 다 써서 통화가 끝났어요.',
+  max_duration: () => `한 통화는 최대 ${state.config.maxCallMinutes}분이라 여기서 마무리했어요.`,
+  server_shutdown: () => '서버 업데이트로 통화가 끊겼어요. 잠시 후 다시 걸어주세요.',
+};
+
 const SETTINGS_KEY = 'langtutor:settings';
 const CAPTIONS_KEY = 'langtutor:captions';
 
@@ -54,7 +61,13 @@ function savePref(key, value) {
 }
 
 const state = {
+  // From /api/config: { voices, googleClientId, freeTrialMinutes, minCallSeconds, maxCallMinutes }
+  config: null,
+  // Signed-in account, or null. balanceSeconds is null when time is unlimited (local development).
+  user: null,
   ws: null,
+  // Server-side id of the current call; the report is generated from its record.
+  callId: null,
   ctx: null,
   mic: null,
   player: null,
@@ -74,7 +87,6 @@ const state = {
   captions: loadPref(CAPTIONS_KEY) ?? true,
   // Bumped per report request so a slow response can't overwrite a newer one.
   feedbackToken: 0,
-  feedbackTurns: [],
 };
 
 function tutorInfo(voice) {
@@ -175,6 +187,7 @@ async function startCall() {
   state.userSpoke = false;
   state.tutorLevel = 0;
   state.responseActive = false;
+  state.callId = null;
   state.feedbackToken++;
 
   const { voice, language, level } = state.options;
@@ -291,6 +304,7 @@ function bargeIn() {
 function handleServerEvent(event) {
   switch (event.type) {
     case 'relay.ready':
+      state.callId = event.callId;
       onReady(event);
       break;
     case 'relay.error':
@@ -362,7 +376,6 @@ function showFeedback() {
   const userTurns = turns.filter((t) => t.role === 'user').length;
   const duration = state.startedAt ? Math.round((Date.now() - state.startedAt) / 1000) : 0;
   state.startedAt = 0;
-  state.feedbackTurns = turns;
 
   const { voice, language, level } = state.options;
   setPhoto($('.report-photo'), voice);
@@ -371,12 +384,16 @@ function showFeedback() {
     ? `${formatDuration(duration)} 동안 대화했어요`
     : state.lastError ? '통화가 연결되지 않았어요' : '통화가 끝났어요';
   $('#again-btn-label').textContent = `${capitalize(voice)}에게 다시 걸기`;
+  const ended = ENDED_MESSAGES[state.endedReason];
+  $('#report-ended').hidden = !ended;
+  $('#report-ended').textContent = ended?.() ?? '';
   $('#metrics').hidden = !userTurns;
   $('#metric-turns').textContent = `${userTurns}번`;
   $('#metric-fixes').textContent = '–';
   $('#metric-expressions').textContent = '–';
   renderTranscript(turns);
   showScreen('feedback');
+  refreshUser();
 
   if (!userTurns) {
     const message = state.lastError ?? '대화 기록이 없어서 리포트를 만들 수 없어요.\n다음엔 튜터에게 한두 마디라도 건네 보세요.';
@@ -397,8 +414,12 @@ async function loadFeedback() {
     const res = await fetch('/api/feedback', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ language: state.options.language, level: state.options.level, transcript: state.feedbackTurns }),
+      body: JSON.stringify({ callId: state.callId }),
     });
+    if (res.status === 401) {
+      showLogin();
+      return;
+    }
     if (!res.ok) throw new Error((await res.json()).error);
     const feedback = await res.json();
     if (token !== state.feedbackToken) return;
@@ -605,20 +626,155 @@ function syncSetup() {
   for (const [name, value] of Object.entries(values)) $(`[data-value="${name}"]`).textContent = value ?? '';
   $('#custom-topic-field').hidden = options.topic !== 'custom';
   $('#call-btn-label').textContent = options.voice ? `${capitalize(options.voice)}에게 전화 걸기` : '전화 걸기';
-  $('#call-btn').disabled = !options.voice;
+  $('#call-btn').disabled = !options.voice || outOfTime();
 }
 
-async function loadVoices() {
-  const { voices } = await (await fetch('/api/config')).json();
-  renderVoices(voices);
-  restoreSettings();
+// ---------- account ----------
+
+function outOfTime() {
+  const balance = state.user?.balanceSeconds;
+  return balance != null && balance < (state.config?.minCallSeconds ?? 0);
+}
+
+function formatBalance(sec) {
+  return sec >= 60 ? `${Math.floor(sec / 60)}분` : `${sec}초`;
+}
+
+// Google profile photo, or the first letter of the name when there is none.
+function setAvatar(avatar, user) {
+  const initial = (user.name || user.email || '?').charAt(0).toUpperCase();
+  if (!user.picture) {
+    avatar.replaceChildren(initial);
+    return;
+  }
+  const img = el('img');
+  img.alt = '';
+  img.referrerPolicy = 'no-referrer';
+  img.onerror = () => avatar.replaceChildren(initial);
+  img.src = user.picture;
+  avatar.replaceChildren(img);
+}
+
+function renderAccount() {
+  const user = state.user;
+  // Without login (local development) there's no account to show.
+  $('#account-btn').hidden = !user || !state.config.googleClientId;
+  if (user && state.config.googleClientId) {
+    const balance = user.balanceSeconds ?? 0;
+    $('#account-minutes').textContent = outOfTime() ? '시간 없음' : `${formatBalance(balance)} 남음`;
+    $('#account-btn').classList.toggle('empty', outOfTime());
+    $('#account-btn').setAttribute('aria-label', `내 계정, 남은 통화 시간 ${formatBalance(balance)}`);
+    setAvatar($('#account-avatar'), user);
+    setAvatar($('#account-sheet-avatar'), user);
+    $('#account-name').textContent = user.name ?? '';
+    $('#account-email').textContent = user.email ?? '';
+    $('#account-balance').textContent = formatBalance(balance);
+  }
+  $('#call-note').textContent = outOfTime()
+    ? '남은 통화 시간이 없어요. 시간이 충전되면 다시 걸 수 있어요.'
+    : '이어폰을 끼면 튜터 목소리가 마이크로 다시 들어가지 않아요';
+  $('#again-btn').disabled = outOfTime();
   syncSetup();
+}
+
+async function refreshUser() {
+  try {
+    const { user } = await (await fetch('/api/me')).json();
+    state.user = user;
+  } catch {
+    return;
+  }
+  renderAccount();
+}
+
+function loadGoogleScript() {
+  if (window.google?.accounts) return Promise.resolve();
+  return new Promise((resolve, reject) => {
+    const script = document.createElement('script');
+    script.src = 'https://accounts.google.com/gsi/client';
+    script.async = true;
+    script.onload = resolve;
+    script.onerror = reject;
+    document.head.append(script);
+  });
+}
+
+async function showLogin() {
+  showScreen('login');
+  const minutes = state.config.freeTrialMinutes;
+  $('#login-note').textContent = minutes > 0 ? `처음 가입하면 무료 통화 ${minutes}분을 드려요` : '';
+  const faces = $('#login-faces');
+  if (!faces.childElementCount) {
+    faces.replaceChildren(...state.config.voices.slice(0, 3).map((voice) => {
+      const photo = el('span', 'photo');
+      setPhoto(photo, voice);
+      return photo;
+    }));
+  }
+  try {
+    await loadGoogleScript();
+  } catch {
+    showLoginError('Google 로그인을 불러오지 못했어요. 네트워크를 확인하고 새로고침해 주세요.');
+    return;
+  }
+  google.accounts.id.initialize({ client_id: state.config.googleClientId, callback: onGoogleCredential });
+  const box = $('#google-btn');
+  google.accounts.id.renderButton(box, {
+    theme: 'outline',
+    size: 'large',
+    shape: 'pill',
+    text: 'continue_with',
+    locale: 'ko',
+    width: Math.min(400, box.clientWidth || 320),
+  });
+}
+
+function showLoginError(message) {
+  $('#login-error').textContent = message;
+  $('#login-error').hidden = !message;
+}
+
+async function onGoogleCredential({ credential }) {
+  showLoginError('');
+  try {
+    const res = await fetch('/api/auth/google', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ credential }),
+    });
+    const body = await res.json();
+    if (!res.ok) throw new Error(body.error);
+    state.user = body.user;
+  } catch (err) {
+    showLoginError(err.message || '로그인하지 못했어요. 다시 시도해주세요.');
+    return;
+  }
+  renderAccount();
+  showScreen('setup');
+}
+
+async function logout() {
+  $('#sheet-account').close();
+  await fetch('/api/auth/logout', { method: 'POST' }).catch(() => {});
+  window.google?.accounts.id.disableAutoSelect();
+  state.user = null;
+  renderAccount();
+  showLogin();
+}
+
+async function init() {
+  syncSetup();
+  state.config = await (await fetch('/api/config')).json();
+  renderVoices(state.config.voices);
+  restoreSettings();
+  await refreshUser();
+  if (state.user) showScreen('setup');
+  else showLogin();
 }
 
 // ---------- wiring ----------
 
-syncSetup();
-loadVoices();
+init();
 
 $('#setup-form').addEventListener('submit', (e) => {
   e.preventDefault();
@@ -664,6 +820,8 @@ $('#captions-btn').addEventListener('click', () => {
   savePref(CAPTIONS_KEY, state.captions);
   applyCaptions();
 });
+$('#account-btn').addEventListener('click', () => $('#sheet-account').showModal());
+$('#logout-btn').addEventListener('click', logout);
 $('#again-btn').addEventListener('click', () => {
   window.speechSynthesis?.cancel();
   startCall();
