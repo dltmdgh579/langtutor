@@ -716,6 +716,7 @@ async function showLogin() {
   showScreen('login');
   const minutes = state.config.freeTrialMinutes;
   $('#login-note').textContent = minutes > 0 ? `처음 가입하면 무료 통화 ${minutes}분을 드려요` : '';
+  renderPricing();
   const faces = $('#login-faces');
   if (!faces.childElementCount) {
     faces.replaceChildren(...state.config.voices.slice(0, 3).map((voice) => {
@@ -803,31 +804,53 @@ function setPayNote(text) {
   $('#pay-note').textContent = text;
 }
 
-// Pack buttons, with prices localized by Paddle for the buyer's country.
-async function renderPacks() {
-  if ($('#pack-list').childElementCount) return;
+// Pack prices (tax included), localized by Paddle for the visitor's country: priceId -> "₩9,900".
+let pricesReady = null;
+function loadPrices() {
   const { packs } = state.config.payments;
-  $('#account-packs').hidden = false;
-  const priceLabels = new Map();
-  $('#pack-list').replaceChildren(...packs.map((pack) => {
-    const button = el('button', 'pack', `${pack.minutes}분`);
-    button.type = 'button';
-    const price = el('span');
-    priceLabels.set(pack.priceId, price);
-    button.append(price);
-    button.addEventListener('click', () => buyPack(pack));
-    return button;
-  }));
-  try {
-    await initPaddle();
-    const preview = await Paddle.PricePreview({ items: packs.map((pack) => ({ priceId: pack.priceId, quantity: 1 })) });
-    for (const item of preview.data.details.lineItems) {
-      const label = priceLabels.get(item.price.id);
-      if (label) label.textContent = item.formattedTotals.total;
+  pricesReady ??= initPaddle()
+    .then(() => Paddle.PricePreview({ items: packs.map((pack) => ({ priceId: pack.priceId, quantity: 1 })) }))
+    .then((preview) => new Map(preview.data.details.lineItems.map((item) => [item.price.id, item.formattedTotals.total])));
+  pricesReady.catch(() => { pricesReady = null; });
+  return pricesReady;
+}
+
+// Each pack as its label plus an empty price slot, filled in once prices load.
+function packRows(tag, onPick) {
+  const slots = new Map();
+  const rows = state.config.payments.packs.map((pack) => {
+    const row = el(tag, tag === 'button' ? 'pack' : null, `${pack.minutes}분`);
+    if (tag === 'button') {
+      row.type = 'button';
+      row.addEventListener('click', () => onPick(pack));
     }
-  } catch {
-    setPayNote('가격을 불러오지 못했어요. 결제는 그대로 할 수 있어요.');
-  }
+    const price = el('span');
+    slots.set(pack.priceId, price);
+    row.append(price);
+    return row;
+  });
+  return { rows, fill: async () => {
+    const prices = await loadPrices();
+    for (const [priceId, price] of slots) price.textContent = prices.get(priceId) ?? '';
+  } };
+}
+
+// Public price list on the sign-in screen.
+function renderPricing() {
+  if (!state.config.payments || $('#price-list').childElementCount) return;
+  const { rows, fill } = packRows('li');
+  $('#price-list').replaceChildren(...rows);
+  $('#login-pricing').hidden = false;
+  fill().catch(() => {});
+}
+
+// Pack buttons in the account sheet.
+function renderPacks() {
+  if ($('#pack-list').childElementCount) return;
+  const { rows, fill } = packRows('button', buyPack);
+  $('#pack-list').replaceChildren(...rows);
+  $('#account-packs').hidden = false;
+  fill().catch(() => setPayNote('가격을 불러오지 못했어요. 결제는 그대로 할 수 있어요.'));
 }
 
 async function buyPack(pack) {
