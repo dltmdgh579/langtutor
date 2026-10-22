@@ -112,7 +112,9 @@ const MIME_TYPES = {
 
 async function serveStatic(req, res) {
   const { pathname } = new URL(req.url, 'http://localhost');
-  const filePath = normalize(join(PUBLIC_DIR, pathname === '/' ? 'index.html' : decodeURIComponent(pathname)));
+  // Extensionless paths are pages, e.g. /privacy -> privacy.html.
+  const page = pathname === '/' ? 'index.html' : extname(pathname) ? pathname : `${pathname}.html`;
+  const filePath = normalize(join(PUBLIC_DIR, decodeURIComponent(page)));
   if (!filePath.startsWith(PUBLIC_DIR.endsWith(sep) ? PUBLIC_DIR : PUBLIC_DIR + sep)) {
     res.writeHead(403).end();
     return;

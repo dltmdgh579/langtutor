@@ -134,6 +134,21 @@ button { font: inherit; letter-spacing: inherit; color: inherit; cursor: pointer
 .login-faces .photo + .photo { margin-left: -14px; }
 .google-btn { display: flex; justify-content: center; min-height: 44px; }
 .login-error { margin: 8px 0 0; font-size: 14px; line-height: 1.5; color: var(--red); text-align: center; }
+.cta-note a { color: inherit; }
+
+/* ---------- privacy policy ---------- */
+
+.appbar a.wordmark { color: inherit; text-decoration: none; }
+.doc { padding: 0 var(--side) 48px; font-size: 15px; line-height: 1.7; color: var(--text-2); }
+.doc .page-title { margin: 8px 0 0; color: var(--text); }
+.doc-meta { margin: 4px 0 24px; font-size: 13px; color: var(--text-3); }
+.doc h2 { margin: 32px 0 8px; font-size: 17px; line-height: 1.5; color: var(--text); }
+.doc p, .doc ul { margin: 0 0 12px; }
+.doc ul { padding-left: 20px; }
+.doc a { color: var(--text); }
+.doc table { width: 100%; margin: 0 0 12px; border-collapse: collapse; font-size: 13.5px; line-height: 1.55; }
+.doc th, .doc td { padding: 8px 6px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+.doc th { color: var(--text); font-weight: 600; white-space: nowrap; }
 
 /* ---------- account ---------- */
 
