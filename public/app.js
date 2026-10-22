@@ -678,9 +678,12 @@ function renderAccount() {
 }
 
 async function refreshUser() {
+  // On a server or network error keep what we have rather than dropping the
+  // account (which would also lift the out-of-time lock on the call button).
   try {
-    const { user } = await (await fetch('/api/me')).json();
-    state.user = user;
+    const res = await fetch('/api/me');
+    if (!res.ok) return;
+    state.user = (await res.json()).user;
   } catch {
     return;
   }

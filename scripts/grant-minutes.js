@@ -17,17 +17,26 @@ if (!process.env.DATABASE_URL) {
 
 const client = new pg.Client({ connectionString: process.env.DATABASE_URL });
 await client.connect();
-const { rows } = await client.query(
-  `update users set balance_seconds = greatest(balance_seconds + $2, 0)
-   where lower(email) = lower($1) returning email, balance_seconds`,
-  [email, Math.round(minutes * 60)],
+// Accounts are keyed by Google id, so one address can belong to more than one
+// (e.g. a deleted and recreated Google account). Never grant to all of them.
+const { rows: matches } = await client.query(
+  'select id, email, created_at from users where lower(email) = lower($1) order by created_at',
+  [email],
 );
-await client.end();
-
-if (!rows.length) {
-  console.error(`${email} 계정이 없습니다. 먼저 한 번 로그인해야 해요.`);
+if (matches.length !== 1) {
+  await client.end();
+  if (!matches.length) {
+    console.error(`${email} 계정이 없습니다. 먼저 한 번 로그인해야 해요.`);
+  } else {
+    console.error(`${email} 주소를 쓰는 계정이 ${matches.length}개예요. SQL로 id를 지정해서 지급하세요.`);
+    for (const row of matches) console.error(`  id ${row.id}, 가입 ${row.created_at.toISOString()}`);
+  }
   process.exit(1);
 }
-for (const row of rows) {
-  console.log(`${row.email}: 남은 시간 ${Math.floor(row.balance_seconds / 60)}분 ${row.balance_seconds % 60}초`);
-}
+const { rows } = await client.query(
+  `update users set balance_seconds = greatest(balance_seconds + $2, 0)
+   where id = $1 returning email, balance_seconds`,
+  [matches[0].id, Math.round(minutes * 60)],
+);
+await client.end();
+console.log(`${rows[0].email}: 남은 시간 ${Math.floor(rows[0].balance_seconds / 60)}분 ${rows[0].balance_seconds % 60}초`);

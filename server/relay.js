@@ -7,6 +7,9 @@
 import WebSocket from 'ws';
 import { buildTutorInstructions, LANGUAGES, LEVELS, TOPICS } from './prompts.js';
 
+// How long the provider may take to set up the session before we give up.
+const CONNECT_TIMEOUT_MS = 20_000;
+
 // Event types the browser is allowed to send upstream. Session configuration
 // stays server-side so a client cannot swap the instructions or model.
 const CLIENT_EVENT_ALLOWLIST = new Set([
@@ -64,8 +67,9 @@ function createTranscript() {
   };
 }
 
-// limitSeconds cuts the call off (reported to the browser as limitReason);
-// onEnd receives the billed seconds and transcript exactly once.
+// limitSeconds (counted from the tutor picking up, like billing) cuts the call
+// off, reported to the browser as limitReason; onEnd receives the billed
+// seconds and transcript exactly once.
 export function handleCall(client, { options, callId, limitSeconds, limitReason, onEnd }, { provider, providerConfig }) {
   const { url, headers } = provider.connection(providerConfig);
   const upstream = new WebSocket(url, { headers });
@@ -84,7 +88,10 @@ export function handleCall(client, { options, callId, limitSeconds, limitReason,
     if (upstream.readyState === WebSocket.OPEN) upstream.send(JSON.stringify(event));
   };
 
-  const limitTimer = setTimeout(() => hangUp(limitReason), limitSeconds * 1000);
+  let limitTimer = setTimeout(() => {
+    sendClient({ type: 'relay.error', message: '튜터와 연결하지 못했어요. 잠시 후 다시 걸어주세요.' });
+    hangUp('connect_timeout');
+  }, CONNECT_TIMEOUT_MS);
 
   function hangUp(reason) {
     if (closed) return;
@@ -112,6 +119,8 @@ export function handleCall(client, { options, callId, limitSeconds, limitReason,
     ready: ({ inputSampleRate, outputSampleRate }) => {
       ready = true;
       answeredAt = Date.now();
+      clearTimeout(limitTimer);
+      limitTimer = setTimeout(() => hangUp(limitReason), limitSeconds * 1000);
       sendClient({ type: 'relay.ready', inputSampleRate, outputSampleRate, voice: options.voice, callId });
     },
   });

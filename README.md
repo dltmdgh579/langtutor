@@ -104,7 +104,7 @@ update users set balance_seconds = balance_seconds + 30 * 60 where email = 'some
 무료 플랜 주의점:
 - 15분 동안 접속이 없으면 서버가 잠들고, 다음 접속 때 켜지는 데 약 1분 걸려요. 잠들지 않게 하려면 Starter(월 $7)로 바꾸면 됩니다.
 - 통화 1분에 서버가 내보내는 트래픽이 약 4~5MB예요. 무료 트래픽 한도를 넘지 않는지 Render 대시보드에서 확인하세요.
-- `GOOGLE_CLIENT_ID`·`DATABASE_URL`을 비워두면 주소를 아는 누구나 내 API 키로 무제한 통화할 수 있어요.
+- Render에서는 `GOOGLE_CLIENT_ID`·`DATABASE_URL`이 없으면 서버가 시작되지 않아요(누구나 내 API 키로 무제한 통화하는 걸 막기 위해). 이때 배포는 실패하고 이전 버전이 계속 돌아가요.
 - 서버를 여러 대로 늘리면 "한 계정 한 통화" 제한이 서버마다 따로 걸려요. 지금 구조는 서버 1대 기준이에요.
 
 ## 구조

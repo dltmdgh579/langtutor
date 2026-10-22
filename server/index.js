@@ -40,16 +40,45 @@ const freeTrialMinutes = Number(process.env.FREE_TRIAL_MINUTES || 10);
 const freeTrialSeconds = Number.isFinite(freeTrialMinutes) ? Math.max(0, Math.round(freeTrialMinutes * 60)) : 600;
 const db = DATABASE_URL ? await createDb(DATABASE_URL) : createMemoryDb();
 const auth = createAuth({ googleClientId: GOOGLE_CLIENT_ID, db, freeTrialSeconds });
+// Without login anyone who finds the address can spend the API key. Failing the
+// deploy keeps the previous (protected) version running on Render.
 if (!auth.enabled && process.env.RENDER) {
-  console.warn('로그인이 꺼져 있어 누구나 접속해 API 키를 쓸 수 있습니다. 배포 환경에서는 GOOGLE_CLIENT_ID와 DATABASE_URL을 설정하세요.');
+  console.error('배포 환경에서는 GOOGLE_CLIENT_ID와 DATABASE_URL을 설정해야 시작할 수 있어요. (로그인 없이는 누구나 API 키로 무제한 통화할 수 있어요)');
+  process.exit(1);
 }
 
-// One call per account at a time: user id -> the running call (null while it starts).
-const activeCalls = new Map();
-// Calls whose record is still being written: call id -> promise.
-const finishingCalls = new Map();
+// A call from the moment it's requested until its record is saved:
+// { id, userId, live, hangUp, saved }. `live` turns false at hang-up; `saved`
+// resolves once the time is deducted and the transcript stored, so the
+// balance, a redial and the report can wait for it instead of reading stale rows.
+const callsByUser = new Map(); // one per account at a time
+const callsById = new Map();
 // Reports being generated, so a retry doesn't pay for a second one: 'user:call' -> promise.
 const pendingFeedback = new Map();
+let shuttingDown = false;
+
+// The browser asks for its report right after hanging up, possibly before the
+// server has seen the hang-up, so allow the call a moment to end.
+const CALL_SETTLE_TIMEOUT_MS = 10_000;
+const settled = (call) => Promise.race([
+  call.saved,
+  new Promise((resolve) => setTimeout(resolve, CALL_SETTLE_TIMEOUT_MS).unref()),
+]);
+
+async function saveCall(callId, result) {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      await db.finishCall(callId, result);
+      return;
+    } catch (err) {
+      if (attempt === 3) {
+        console.error(`[call ${callId}] could not save (unbilled ${result.billedSeconds}s):`, err.message);
+        return;
+      }
+      await new Promise((resolve) => setTimeout(resolve, attempt * 1000));
+    }
+  }
+}
 
 function publicUser(user) {
   if (!user) return null;
@@ -172,8 +201,14 @@ async function handleApi(req, res) {
     return;
   }
 
-  const user = await auth.userFromRequest(req);
+  let user = await auth.userFromRequest(req);
   if (route === 'GET /api/me') {
+    // Right after hanging up, wait for the deduction so the balance is current.
+    const call = user && callsByUser.get(user.id);
+    if (call && !call.live) {
+      await settled(call);
+      user = await auth.userFromRequest(req);
+    }
     sendJson(res, 200, { user: publicUser(user) });
     return;
   }
@@ -203,7 +238,8 @@ async function handleApi(req, res) {
 
 // Reports are made from the transcript the server recorded and generated once per call.
 async function feedbackForCall(callId, user) {
-  await finishingCalls.get(callId);
+  const running = callsById.get(callId);
+  if (running?.userId === user.id) await settled(running);
   const call = await db.getCall(callId, user.id);
   if (!call?.transcript) return null;
   if (call.feedback) return call.feedback;
@@ -221,7 +257,23 @@ async function startCall(client, req, user) {
     client.send(JSON.stringify({ type: 'relay.error', message }));
     client.close();
   };
-  if (activeCalls.has(user.id)) {
+  if (shuttingDown) {
+    refuse('서버를 업데이트하는 중이에요. 잠시 후 다시 걸어주세요.');
+    return;
+  }
+
+  // A redial right after hanging up: wait for the last call's deduction so
+  // this one starts from the real balance.
+  const previous = callsByUser.get(user.id);
+  if (previous && !previous.live) {
+    await settled(previous);
+    user = await auth.userFromRequest(req);
+    if (!user) {
+      client.close();
+      return;
+    }
+  }
+  if (callsByUser.get(user.id)?.live) {
     refuse('이미 다른 창에서 통화 중이에요. 그 통화를 끊고 다시 걸어주세요.');
     return;
   }
@@ -230,34 +282,51 @@ async function startCall(client, req, user) {
     return;
   }
 
-  activeCalls.set(user.id, null);
+  let markSaved;
+  const call = { id: null, userId: user.id, live: true, hangUp: null, saved: new Promise((r) => { markSaved = r; }) };
+  callsByUser.set(user.id, call);
+  const forget = () => {
+    if (callsByUser.get(user.id) === call) callsByUser.delete(user.id);
+    if (call.id) callsById.delete(call.id);
+    markSaved();
+  };
+
   const options = parseOptions(new URL(req.url, 'http://localhost').searchParams, provider.voices);
-  let callId;
   try {
-    callId = await db.startCall(user.id, provider.id, options);
+    call.id = await db.startCall(user.id, provider.id, options);
   } catch (err) {
-    activeCalls.delete(user.id);
     console.error('could not create call record:', err.message);
+    forget();
     refuse('통화를 시작하지 못했어요. 잠시 후 다시 걸어주세요.');
+    return;
+  }
+  callsById.set(call.id, call);
+
+  const onEnd = (result) => {
+    call.live = false;
+    saveCall(call.id, result).finally(forget);
+  };
+  if (shuttingDown) {
+    onEnd({ billedSeconds: 0, reason: 'server_shutdown', transcript: [] });
+    refuse('서버를 업데이트하는 중이에요. 잠시 후 다시 걸어주세요.');
     return;
   }
 
   const maxSeconds = config.maxCallMinutes * 60;
   const limitSeconds = Math.min(maxSeconds, user.balanceSeconds);
-  const call = handleCall(client, {
-    options,
-    callId,
-    limitSeconds,
-    limitReason: limitSeconds < maxSeconds ? 'out_of_minutes' : 'max_duration',
-    onEnd(result) {
-      activeCalls.delete(user.id);
-      const saving = db.finishCall(callId, result)
-        .catch((err) => console.error(`[call ${callId}] could not save:`, err.message))
-        .finally(() => finishingCalls.delete(callId));
-      finishingCalls.set(callId, saving);
-    },
-  }, config);
-  if (activeCalls.has(user.id)) activeCalls.set(user.id, call);
+  try {
+    ({ hangUp: call.hangUp } = handleCall(client, {
+      options,
+      callId: call.id,
+      limitSeconds,
+      limitReason: limitSeconds < maxSeconds ? 'out_of_minutes' : 'max_duration',
+      onEnd,
+    }, config));
+  } catch (err) {
+    console.error(`[call ${call.id}] failed to start:`, err.message);
+    onEnd({ billedSeconds: 0, reason: 'start_failed', transcript: [] });
+    refuse('통화를 시작하지 못했어요. 잠시 후 다시 걸어주세요.');
+  }
 }
 
 const wss = new WebSocketServer({ noServer: true, maxPayload: 1024 * 1024 });
@@ -287,10 +356,13 @@ server.on('upgrade', async (req, socket, head) => {
 // Hosting platforms stop the old instance on every deploy: end its calls
 // first so they're billed and their transcripts saved.
 async function shutdown(signal) {
-  console.log(`${signal}: ending ${activeCalls.size} call(s)`);
+  shuttingDown = true;
+  const calls = [...callsByUser.values()];
+  console.log(`${signal}: ending ${calls.length} call(s)`);
   server.close();
-  for (const call of activeCalls.values()) call?.hangUp('server_shutdown');
-  await Promise.allSettled(finishingCalls.values());
+  for (const call of calls) call.hangUp?.('server_shutdown');
+  // Calls still starting see shuttingDown and end themselves.
+  await Promise.allSettled([...calls.map((call) => call.saved), ...pendingFeedback.values()]);
   await db.close();
   process.exit(0);
 }
