@@ -34,7 +34,7 @@ export function createAuth(password) {
     checkHttp(req, res) {
       if (hasCookie(req)) return true;
       if (!hasBasicAuth(req)) {
-        res.writeHead(401, { 'WWW-Authenticate': 'Basic realm="LangTutor", charset="UTF-8"' })
+        res.writeHead(401, { 'WWW-Authenticate': 'Basic realm="Rinrin", charset="UTF-8"' })
           .end('Password required');
         return false;
       }

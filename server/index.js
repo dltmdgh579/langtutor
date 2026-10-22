@@ -112,5 +112,5 @@ server.on('upgrade', (req, socket, head) => {
 });
 
 server.listen(config.port, () => {
-  console.log(`LangTutor running at http://localhost:${config.port} (${provider.id}: ${config.providerConfig.voiceModel})`);
+  console.log(`Rinrin running at http://localhost:${config.port} (${provider.id}: ${config.providerConfig.voiceModel})`);
 });
