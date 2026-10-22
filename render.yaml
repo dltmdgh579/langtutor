@@ -19,7 +19,11 @@ services:
         value: gemini
       - key: GEMINI_API_KEY
         sync: false
-      - key: APP_PASSWORD
+      - key: GOOGLE_CLIENT_ID
         sync: false
+      - key: DATABASE_URL
+        sync: false
+      - key: FREE_TRIAL_MINUTES
+        value: "10"
       - key: MAX_CALL_MINUTES
         value: "10"

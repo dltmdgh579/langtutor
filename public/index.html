@@ -25,9 +25,31 @@
   </svg>
 
   <main class="app">
-    <!-- 1. 설정 화면 -->
-    <section class="screen setup" data-screen="setup">
+    <!-- 0. 로그인 화면 -->
+    <section class="screen login" data-screen="login" hidden>
       <header class="appbar"><span class="wordmark">Rinrin</span></header>
+
+      <div class="login-faces" id="login-faces" aria-hidden="true"></div>
+      <h1 class="page-title">원어민 튜터에게<br />지금 바로 전화해요</h1>
+      <p class="page-sub">영어, 일본어, 중국어 등 6개 언어로 편하게 대화하고, 통화가 끝나면 고칠 문장과 오늘의 표현을 정리해 드려요.</p>
+
+      <div class="bottom-cta">
+        <div class="google-btn" id="google-btn"></div>
+        <p class="login-error" id="login-error" role="alert" hidden></p>
+        <p class="cta-note" id="login-note"></p>
+        <p class="cta-note">수집하는 정보와 처리 방법은 <a href="/privacy" target="_blank">개인정보처리방침</a>에 있어요</p>
+      </div>
+    </section>
+
+    <!-- 1. 설정 화면 -->
+    <section class="screen setup" data-screen="setup" hidden>
+      <header class="appbar">
+        <span class="wordmark">Rinrin</span>
+        <button type="button" class="account-btn" id="account-btn" hidden>
+          <span id="account-minutes"></span>
+          <span class="avatar" id="account-avatar" aria-hidden="true"></span>
+        </button>
+      </header>
 
       <h1 class="page-title">누구와 통화할까요?</h1>
       <p class="page-sub">원어민 AI 튜터에게 바로 전화를 걸어 편하게 이야기해요. 틀려도 괜찮아요.</p>
@@ -111,9 +133,19 @@
             <svg class="icon" aria-hidden="true"><use href="#i-phone" /></svg>
             <span id="call-btn-label">전화 걸기</span>
           </button>
-          <p class="cta-note">이어폰을 끼면 튜터 목소리가 마이크로 다시 들어가지 않아요</p>
+          <p class="cta-note" id="call-note">이어폰을 끼면 튜터 목소리가 마이크로 다시 들어가지 않아요</p>
         </div>
       </form>
+
+      <dialog class="sheet" id="sheet-account" aria-labelledby="account-name">
+        <div class="sheet-handle" aria-hidden="true"></div>
+        <div class="account-head">
+          <span class="avatar" id="account-sheet-avatar" aria-hidden="true"></span>
+          <div><b id="account-name"></b><small id="account-email"></small></div>
+        </div>
+        <div class="account-balance"><span>남은 통화 시간</span><b id="account-balance"></b></div>
+        <button type="button" class="btn-plain account-logout" id="logout-btn">로그아웃</button>
+      </dialog>
     </section>
 
     <!-- 2. 통화 화면 -->
@@ -161,6 +193,7 @@
         <span class="photo report-photo"><img id="report-avatar" alt="" /></span>
         <p class="report-kicker" id="feedback-meta"></p>
         <h1 class="page-title" id="report-title"></h1>
+        <p class="report-ended" id="report-ended" hidden></p>
       </div>
 
       <dl class="metrics" id="metrics">

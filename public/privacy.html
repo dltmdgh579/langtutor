@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)" />
+  <meta name="theme-color" content="#101013" media="(prefers-color-scheme: dark)" />
+  <title>개인정보처리방침 · Rinrin</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css" />
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <main class="app">
+    <header class="appbar"><a class="wordmark" href="/">Rinrin</a></header>
+
+    <article class="doc">
+      <h1 class="page-title">개인정보처리방침</h1>
+      <p class="doc-meta">시행일 2026년 10월 22일</p>
+
+      <p>Rinrin(이하 “서비스”)은 AI 튜터와 외국어로 통화하고 통화 후 리포트를 받는 서비스입니다. 서비스는 이용자의 개인정보를 아래와 같이 처리합니다.</p>
+
+      <h2>1. 수집하는 정보와 목적</h2>
+      <table>
+        <thead><tr><th>항목</th><th>목적</th></tr></thead>
+        <tbody>
+          <tr><td>Google 계정 고유 식별자, 이메일 주소, 이름, 프로필 사진 주소</td><td>회원 식별, 로그인, 계정 화면 표시, 문의 응대</td></tr>
+          <tr><td>남은 통화 시간, 통화별 사용 시간</td><td>통화 시간 지급과 차감</td></tr>
+          <tr><td>통화 설정(언어, 수준, 주제, 튜터 목소리, 교정 방식, 직접 입력한 주제), 통화 시작·종료 시각과 종료 사유</td><td>통화 진행, 통화 기록 관리</td></tr>
+          <tr><td>통화 중 대화 내용(음성을 글로 바꾼 텍스트)과 이를 분석한 리포트</td><td>통화 후 리포트 제공</td></tr>
+          <tr><td>로그인 유지용 쿠키, 접속 IP 주소와 접속·오류 기록</td><td>로그인 유지, 부정 이용 방지, 장애 대응</td></tr>
+        </tbody>
+      </table>
+      <p>통화 음성은 실시간으로 아래 Google Gemini API에 전달되어 처리될 뿐, 서비스 서버에 음성 파일로 저장하지 않습니다. 서비스는 Google 계정 비밀번호를 받거나 저장하지 않습니다.</p>
+      <p>언어·수준 등 마지막으로 고른 설정과 자막 표시 여부는 이용자 브라우저에만 저장되며 서버로 보내지 않습니다.</p>
+
+      <h2>2. 보유 기간</h2>
+      <ul>
+        <li>계정 정보, 통화 기록, 리포트: 회원 탈퇴(삭제 요청) 시까지. 요청을 받으면 지체 없이 함께 삭제합니다.</li>
+        <li>로그인 쿠키: 발급 후 30일 또는 로그아웃할 때까지</li>
+        <li>접속·오류 기록: 호스팅 업체(Render)의 기록 보관 기간 동안</li>
+      </ul>
+
+      <h2>3. 처리 위탁과 국외 이전</h2>
+      <p>서비스 제공을 위해 아래 업체에 개인정보 처리를 맡기며, 이 과정에서 개인정보가 국외로 이전됩니다. 이전은 서비스 이용 시 네트워크를 통해 이루어지며, 보유 기간은 위 2번과 같습니다.</p>
+      <table>
+        <thead><tr><th>이전받는 자</th><th>국가</th><th>항목</th><th>목적</th></tr></thead>
+        <tbody>
+          <tr><td>Google LLC (Gemini API)</td><td>미국 등 Google 데이터센터 소재 국가</td><td>통화 음성, 대화 내용, 통화 설정</td><td>AI 튜터 통화, 리포트 생성</td></tr>
+          <tr><td>Neon (Databricks, Inc.)</td><td>싱가포르(AWS)</td><td>1번의 계정 정보, 통화 기록, 리포트</td><td>데이터베이스 보관</td></tr>
+          <tr><td>Render Services, Inc.</td><td>싱가포르</td><td>1번의 모든 항목(전송 과정), 접속·오류 기록</td><td>서비스 서버 운영</td></tr>
+        </tbody>
+      </table>
+      <p>서비스가 Gemini API를 무료 등급으로 사용하는 동안에는 Google이 전달된 내용과 응답을 자사 제품 개선에 활용할 수 있고, 이 과정에서 사람이 내용을 검토할 수 있습니다. 통화 중에 주민등록번호, 계좌번호 같은 민감한 정보는 말하지 말아 주세요.</p>
+
+      <h2>4. 제3자 제공</h2>
+      <p>서비스는 위 위탁 외에 이용자의 개인정보를 제3자에게 제공하지 않습니다. 다만 법령에 따라 요구되는 경우는 예외로 합니다.</p>
+
+      <h2>5. 이용자의 권리</h2>
+      <p>이용자는 언제든지 자신의 개인정보 열람, 정정, 삭제, 처리 정지를 요청할 수 있습니다. 아래 이메일로 로그인한 Google 계정 이메일과 함께 요청하면 본인 확인 후 지체 없이 처리합니다.</p>
+
+      <h2>6. 만 14세 미만 아동</h2>
+      <p>서비스는 만 14세 미만 아동의 가입을 받지 않습니다. 만 14세 미만 아동의 정보가 수집된 사실을 알게 되면 즉시 삭제합니다.</p>
+
+      <h2>7. 쿠키</h2>
+      <p>서비스는 로그인 상태를 유지하기 위한 쿠키 하나만 사용하며, 광고나 행동 추적용 쿠키는 쓰지 않습니다. 브라우저 설정에서 쿠키를 거부할 수 있지만, 그러면 로그인이 필요한 기능을 쓸 수 없습니다.</p>
+
+      <h2>8. 안전성 확보 조치</h2>
+      <ul>
+        <li>모든 통신은 HTTPS로 암호화합니다.</li>
+        <li>로그인 쿠키 값은 서버에 원문 대신 해시로만 저장합니다.</li>
+        <li>데이터베이스 접속은 암호화된 연결과 인증서 검증을 거칩니다.</li>
+      </ul>
+
+      <h2>9. 개인정보 보호책임자와 문의</h2>
+      <p>개인정보 보호책임자: Rinrin 운영자<br />이메일: <a href="mailto:rinrinmakes@gmail.com">rinrinmakes@gmail.com</a></p>
+      <p>개인정보 침해에 대한 상담은 개인정보침해신고센터(국번 없이 118, privacy.kisa.or.kr)나 개인정보분쟁조정위원회(1833-6972, www.kopico.go.kr)에도 할 수 있습니다.</p>
+
+      <h2>10. 방침의 변경</h2>
+      <p>이 방침을 바꾸는 경우 시행 7일 전부터 이 페이지에 알립니다.</p>
+    </article>
+  </main>
+</body>
+</html>
