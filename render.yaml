@@ -25,5 +25,14 @@ services:
         sync: false
       - key: FREE_TRIAL_MINUTES
         value: "10"
+      # 결제를 붙일 때 채우기 (README의 "결제 (Paddle)"). 비워두면 충전 버튼이 없어요.
+      - key: PADDLE_ENV
+        value: sandbox
+      - key: PADDLE_CLIENT_TOKEN
+        sync: false
+      - key: PADDLE_WEBHOOK_SECRET
+        sync: false
+      - key: PADDLE_PRICES
+        sync: false
       - key: MAX_CALL_MINUTES
         value: "10"

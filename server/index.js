@@ -7,6 +7,7 @@ import { createAuth } from './auth.js';
 import { createDb, createMemoryDb } from './db.js';
 import { handleCall, parseOptions } from './relay.js';
 import { generateFeedback } from './feedback.js';
+import { createPayments, readPaddleConfig } from './payments.js';
 import { PROVIDERS } from './providers/index.js';
 
 const providerId = process.env.VOICE_PROVIDER || 'gemini';
@@ -47,6 +48,19 @@ if (!auth.enabled && process.env.RENDER) {
   process.exit(1);
 }
 
+let paddleConfig;
+try {
+  paddleConfig = readPaddleConfig(process.env);
+} catch (err) {
+  console.error(err.message);
+  process.exit(1);
+}
+if (paddleConfig && !auth.enabled) {
+  console.error('결제(PADDLE_*)를 쓰려면 GOOGLE_CLIENT_ID와 DATABASE_URL도 설정하세요. 충전한 시간을 계정에 저장해야 해요.');
+  process.exit(1);
+}
+const payments = paddleConfig ? createPayments(paddleConfig, db) : null;
+
 // A call from the moment it's requested until its record is saved:
 // { id, userId, live, hangUp, saved }. `live` turns false at hang-up; `saved`
 // resolves once the time is deducted and the transcript stored, so the
@@ -82,6 +96,8 @@ async function saveCall(callId, result) {
 function publicUser(user) {
   if (!user) return null;
   return {
+    // Sent with a checkout so the payment's webhook names the account to credit.
+    id: user.id,
     email: user.email,
     name: user.name,
     picture: user.picture,
@@ -167,6 +183,11 @@ function sendJson(res, status, body) {
 
 async function handleApi(req, res) {
   const route = `${req.method} ${new URL(req.url, 'http://localhost').pathname}`;
+  // Paddle's servers post without an Origin or a session; the signature is the check.
+  if (route === 'POST /api/paddle/webhook' && payments) {
+    await payments.handleWebhook(req, res);
+    return;
+  }
   if (req.method === 'POST' && !isSameOrigin(req)) {
     sendJson(res, 403, { error: '허용되지 않은 요청이에요.' });
     return;
@@ -180,6 +201,7 @@ async function handleApi(req, res) {
       freeTrialMinutes: auth.enabled ? freeTrialSeconds / 60 : 0,
       minCallSeconds: MIN_CALL_SECONDS,
       maxCallMinutes: config.maxCallMinutes,
+      payments: payments?.clientConfig ?? null,
     });
     return;
   }
