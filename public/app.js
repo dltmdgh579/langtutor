@@ -710,7 +710,8 @@ function loadGoogleScript() {
 async function showLogin() {
   showScreen('login');
   const minutes = state.config.freeTrialMinutes;
-  $('#login-note').textContent = minutes > 0 ? `처음 가입하면 무료 통화 ${minutes}분을 드려요` : '';
+  $('#trial-minutes').textContent = minutes;
+  $('#trial-callout').hidden = !(minutes > 0);
   renderPricing();
   const faces = $('#login-faces');
   if (!faces.childElementCount) {
@@ -799,44 +800,63 @@ function setPayNote(text) {
   $('#pay-note').textContent = text;
 }
 
-// Pack prices (tax included), localized by Paddle for the visitor's country: priceId -> "₩9,900".
+// Pack prices (tax included), localized by Paddle for the visitor's country:
+// priceId -> { total: "₩9,900", perMinute: "₩165" }.
 let pricesReady = null;
 function loadPrices() {
   const { packs } = state.config.payments;
+  const minutesByPrice = new Map(packs.map((pack) => [pack.priceId, pack.minutes]));
   pricesReady ??= initPaddle()
     .then(() => Paddle.PricePreview({ items: packs.map((pack) => ({ priceId: pack.priceId, quantity: 1 })) }))
-    .then((preview) => new Map(preview.data.details.lineItems.map((item) => [item.price.id, item.formattedTotals.total])));
+    .then((preview) => {
+      const currency = preview.data.currencyCode;
+      // Paddle totals are in the currency's smallest unit (KRW has none, USD has cents).
+      const digits = new Intl.NumberFormat('en', { style: 'currency', currency }).resolvedOptions().maximumFractionDigits;
+      const format = new Intl.NumberFormat('ko-KR', { style: 'currency', currency, maximumFractionDigits: digits });
+      return new Map(preview.data.details.lineItems.map((item) => [item.price.id, {
+        total: item.formattedTotals.total,
+        perMinute: format.format(Number(item.totals.total) / 10 ** digits / minutesByPrice.get(item.price.id)),
+      }]));
+    });
   pricesReady.catch(() => { pricesReady = null; });
   return pricesReady;
 }
 
-// Each pack as its label plus an empty price slot, filled in once prices load.
+// Each pack as its label and per-minute price plus an empty price slot, filled in once prices load.
 function packRows(tag, onPick) {
   const slots = new Map();
   const rows = state.config.payments.packs.map((pack) => {
-    const row = el(tag, tag === 'button' ? 'pack' : null, `${pack.minutes}분`);
+    const row = el(tag, tag === 'button' ? 'pack' : null);
     if (tag === 'button') {
       row.type = 'button';
       row.addEventListener('click', () => onPick(pack));
     }
-    const price = el('span');
-    slots.set(pack.priceId, price);
-    row.append(price);
+    const name = el('span', 'pack-name', `${pack.minutes}분`);
+    const perMinute = el('small');
+    const price = el('span', 'pack-price');
+    name.append(perMinute);
+    slots.set(pack.priceId, { price, perMinute });
+    row.append(name, price);
     return row;
   });
   return { rows, fill: async () => {
     const prices = await loadPrices();
-    for (const [priceId, price] of slots) price.textContent = prices.get(priceId) ?? '';
+    for (const [priceId, slot] of slots) {
+      const found = prices.get(priceId);
+      slot.price.textContent = found?.total ?? '';
+      slot.perMinute.textContent = found ? `분당 ${found.perMinute}` : '';
+    }
   } };
 }
 
-// Public price list on the sign-in screen.
+// Public price list on the sign-in screen. index.html ships the KRW prices so they show
+// without Paddle; once Paddle answers, swap in its prices for the visitor's country.
 function renderPricing() {
-  if (!state.config.payments || $('#price-list').childElementCount) return;
+  const list = $('#price-list');
+  if (!state.config.payments || list.dataset.source === 'paddle') return;
+  list.dataset.source = 'paddle';
   const { rows, fill } = packRows('li');
-  $('#price-list').replaceChildren(...rows);
-  $('#login-pricing').hidden = false;
-  fill().catch(() => {});
+  fill().then(() => list.replaceChildren(...rows)).catch(() => {});
 }
 
 // Pack buttons in the account sheet.
