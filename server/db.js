@@ -19,6 +19,18 @@ const QUERY_TIMEOUT_MS = 5_000;
 
 const isId = (value) => typeof value === 'string' && /^\d{1,18}$/.test(value);
 
+// A past lesson as the history list shows it.
+function toCallSummary(row) {
+  return {
+    id: String(row.id),
+    startedAt: row.started_at.toISOString(),
+    seconds: row.billed_seconds ?? 0,
+    options: row.options,
+    // Number of fixes in the report, or null before there is one.
+    corrections: row.corrections,
+  };
+}
+
 function toUser(row) {
   return {
     id: String(row.id),
@@ -103,10 +115,34 @@ export async function createDb(connectionString) {
     async getCall(callId, userId) {
       if (!isId(callId)) return null;
       const { rows } = await pool.query(
-        'select options, transcript, feedback from calls where id = $1 and user_id = $2',
+        `select options, transcript, feedback, started_at, billed_seconds
+         from calls where id = $1 and user_id = $2`,
         [callId, userId],
       );
-      return rows[0] ?? null;
+      const row = rows[0];
+      if (!row) return null;
+      return {
+        options: row.options,
+        transcript: row.transcript,
+        feedback: row.feedback,
+        startedAt: row.started_at.toISOString(),
+        seconds: row.billed_seconds ?? 0,
+      };
+    },
+
+    // Finished calls in which the learner said something, newest first.
+    // `before` is the id of the last call on the previous page.
+    async listCalls(userId, { before = null, limit }) {
+      const { rows } = await pool.query(
+        `select id, started_at, billed_seconds, options,
+           jsonb_array_length(feedback->'corrections') as corrections
+         from calls
+         where user_id = $1 and ended_at is not null and transcript @> '[{"role":"user"}]'
+           and ($2::bigint is null or id < $2)
+         order by id desc limit $3`,
+        [userId, isId(before) ? before : null, limit],
+      );
+      return rows.map(toCallSummary);
     },
 
     async saveFeedback(callId, feedback) {
@@ -176,17 +212,31 @@ export function createMemoryDb() {
   return {
     async startCall(userId, provider, options) {
       const id = String(nextId++);
-      calls.set(id, { userId, options, transcript: null, feedback: null });
+      calls.set(id, { userId, options, transcript: null, feedback: null, startedAt: new Date().toISOString(), seconds: 0 });
       if (calls.size > MAX_CALLS) calls.delete(calls.keys().next().value);
       return id;
     },
-    async finishCall(callId, { transcript }) {
+    async finishCall(callId, { transcript, billedSeconds }) {
       const call = calls.get(callId);
-      if (call) call.transcript = transcript;
+      if (call) Object.assign(call, { transcript, seconds: billedSeconds });
     },
     async getCall(callId, userId) {
       const call = calls.get(callId);
       return call?.userId === userId ? call : null;
+    },
+    async listCalls(userId, { before = null, limit }) {
+      return [...calls.entries()]
+        .filter(([id, call]) => call.userId === userId && call.transcript?.some((t) => t.role === 'user')
+          && (before === null || Number(id) < Number(before)))
+        .reverse()
+        .slice(0, limit)
+        .map(([id, call]) => ({
+          id,
+          startedAt: call.startedAt,
+          seconds: call.seconds,
+          options: call.options,
+          corrections: call.feedback?.corrections.length ?? null,
+        }));
     },
     async saveFeedback(callId, feedback) {
       const call = calls.get(callId);

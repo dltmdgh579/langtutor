@@ -54,6 +54,13 @@ export const gemini = {
       if (modelItem) emit({ type: 'response.done' });
       modelItem = null;
     };
+    // A text turn the learner doesn't hear: the tutor answers it right away
+    // (and stops anything it was still saying).
+    const instruct = (text) => {
+      sendUpstream({
+        clientContent: { turns: [{ role: 'user', parts: [{ text }] }], turnComplete: true },
+      });
+    };
 
     return {
       onOpen() {
@@ -82,12 +89,7 @@ export const gemini = {
         if (msg.setupComplete) {
           ready({ inputSampleRate: INPUT_SAMPLE_RATE, outputSampleRate: OUTPUT_SAMPLE_RATE });
           // Let the tutor speak first, like answering a scheduled call.
-          sendUpstream({
-            clientContent: {
-              turns: [{ role: 'user', parts: [{ text: '(The call has just connected.)' }] }],
-              turnComplete: true,
-            },
-          });
+          instruct('(The call has just connected.)');
           return;
         }
 
@@ -124,6 +126,8 @@ export const gemini = {
           finishModel();
         }
       },
+
+      instruct,
 
       onClientEvent(event) {
         // response.cancel / conversation.item.truncate need no forwarding:

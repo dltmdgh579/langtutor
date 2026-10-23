@@ -82,6 +82,14 @@ const state = {
   captions: loadPref(CAPTIONS_KEY) ?? true,
   // Bumped per report request so a slow response can't overwrite a newer one.
   feedbackToken: 0,
+  // When the server will end the call, once it has said so (the last minute): { at, reason }.
+  callEnds: null,
+  // Whether the report on screen is of a past lesson opened from the history list.
+  reportFromHistory: false,
+  // Cursor for the next page of past lessons, or null when there is none.
+  historyNext: null,
+  // Bumped per history load so a slow page can't land on a newer list.
+  historyToken: 0,
 };
 
 function tutorInfo(voice) {
@@ -183,6 +191,8 @@ async function startCall() {
   state.tutorLevel = 0;
   state.responseActive = false;
   state.callId = null;
+  state.callEnds = null;
+  state.reportFromHistory = false;
   state.feedbackToken++;
 
   const { voice, language, level } = state.options;
@@ -197,6 +207,7 @@ async function startCall() {
   $('#call-tip').hidden = true;
   $('#call-timer').hidden = true;
   $('#call-timer').textContent = '00:00';
+  $('#call-notice').hidden = true;
   $('#orb').classList.add('ringing');
   setMuted(false);
   applyCaptions();
@@ -238,6 +249,12 @@ async function onReady({ inputSampleRate, outputSampleRate }) {
 function updateTimer() {
   const sec = Math.floor((Date.now() - state.startedAt) / 1000);
   $('#call-timer').textContent = formatClock(sec);
+  if (state.callEnds) {
+    const left = formatClock(Math.max(0, Math.ceil((state.callEnds.at - Date.now()) / 1000)));
+    $('#call-notice').textContent = state.callEnds.reason === 'out_of_minutes'
+      ? `남은 통화 시간 ${left}`
+      : `${left} 뒤에 통화가 끝나요`;
+  }
 }
 
 function tick() {
@@ -308,6 +325,12 @@ function handleServerEvent(event) {
     case 'relay.ended':
       state.endedReason = event.reason;
       break;
+    case 'relay.time_left':
+      // The tutor is wrapping up; show the learner how long is left.
+      state.callEnds = { at: Date.now() + event.seconds * 1000, reason: event.reason };
+      updateTimer();
+      $('#call-notice').hidden = false;
+      break;
     case 'input_audio_buffer.speech_started':
       state.userSpoke = true;
       bargeIn();
@@ -371,34 +394,41 @@ function endCall() {
 // ---------- report ----------
 
 function showFeedback() {
-  const turns = transcriptForFeedback();
-  const userTurns = turns.filter((t) => t.role === 'user').length;
   const duration = state.startedAt ? Math.round((Date.now() - state.startedAt) / 1000) : 0;
   state.startedAt = 0;
+  const turns = transcriptForFeedback();
+  const ended = ENDED_MESSAGES[state.endedReason];
+  renderReportHead({ turns, seconds: duration, endedNote: ended?.() ?? '' });
+  if (!turns.some((t) => t.role === 'user')) {
+    const message = state.lastError ?? '대화 기록이 없어서 리포트를 만들 수 없어요.\n다음엔 튜터에게 한두 마디라도 건네 보세요.';
+    $('#feedback-body').replaceChildren(el('p', state.lastError ? 'report-note error' : 'report-note', message));
+    return;
+  }
+  loadFeedback();
+}
 
+// The parts of the report that don't wait for the feedback, for state.options.
+function renderReportHead({ turns, seconds, startedAt = null, endedNote = '' }) {
+  const userTurns = turns.filter((t) => t.role === 'user').length;
   const { voice, language, level } = state.options;
   setPhoto($('.report-photo'), voice);
-  $('#feedback-meta').textContent = `${capitalize(voice)} · ${LANGUAGE_LABELS[language]} ${LEVEL_LABELS[level]} · ${topicLabel(state.options)}`;
+  const meta = `${capitalize(voice)} · ${LANGUAGE_LABELS[language]} ${LEVEL_LABELS[level]} · ${topicLabel(state.options)}`;
+  $('#feedback-meta').textContent = startedAt ? `${formatDate(startedAt)} · ${meta}` : meta;
   $('#report-title').textContent = userTurns
-    ? `${formatDuration(duration)} 동안 대화했어요`
+    ? `${formatDuration(seconds)} 동안 대화했어요`
     : state.lastError ? '통화가 연결되지 않았어요' : '통화가 끝났어요';
   $('#again-btn-label').textContent = `${capitalize(voice)}에게 다시 걸기`;
-  const ended = ENDED_MESSAGES[state.endedReason];
-  $('#report-ended').hidden = !ended;
-  $('#report-ended').textContent = ended?.() ?? '';
+  // A past lesson's tutor may no longer be offered.
+  $('#again-btn').hidden = !state.config.voices.includes(voice);
+  $('#settings-btn').textContent = state.reportFromHistory ? '지난 수업 목록' : '튜터나 설정 바꾸기';
+  $('#report-ended').hidden = !endedNote;
+  $('#report-ended').textContent = endedNote;
   $('#metrics').hidden = !userTurns;
   $('#metric-turns').textContent = `${userTurns}번`;
   $('#metric-fixes').textContent = '–';
   $('#metric-expressions').textContent = '–';
   renderTranscript(turns);
   showScreen('feedback');
-
-  if (!userTurns) {
-    const message = state.lastError ?? '대화 기록이 없어서 리포트를 만들 수 없어요.\n다음엔 튜터에게 한두 마디라도 건네 보세요.';
-    $('#feedback-body').replaceChildren(el('p', state.lastError ? 'report-note error' : 'report-note', message));
-    return;
-  }
-  loadFeedback();
 }
 
 async function loadFeedback() {
@@ -582,6 +612,14 @@ function formatDuration(sec) {
   return sec >= 60 ? `${Math.floor(sec / 60)}분 ${sec % 60}초` : `${sec}초`;
 }
 
+// "10월 23일 (목) 오후 3:12"
+const DATE_FORMAT = new Intl.DateTimeFormat('ko-KR', {
+  month: 'long', day: 'numeric', weekday: 'short', hour: 'numeric', minute: '2-digit',
+});
+function formatDate(iso) {
+  return DATE_FORMAT.format(new Date(iso));
+}
+
 // ---------- setup screen ----------
 
 function renderVoices(voices) {
@@ -602,8 +640,8 @@ function renderVoices(voices) {
   }));
 }
 
-function restoreSettings() {
-  const saved = loadPref(SETTINGS_KEY);
+// Selects the given options in the setup form (the saved ones, or a past lesson's).
+function applySettings(saved) {
   if (!saved || typeof saved !== 'object') return;
   for (const name of ['language', 'level', 'topic', 'voice', 'correction']) {
     if (typeof saved[name] !== 'string') continue;
@@ -611,6 +649,7 @@ function restoreSettings() {
     if (input) input.checked = true;
   }
   if (typeof saved.customTopic === 'string') $('#custom-topic').value = saved.customTopic;
+  syncSetup();
 }
 
 function syncSetup() {
@@ -657,6 +696,7 @@ function renderAccount() {
   const user = state.user;
   // Without login (local development) there's no account to show.
   $('#account-btn').hidden = !user || !state.config.googleClientId;
+  $('#history-btn').hidden = !user;
   if (user && state.config.googleClientId) {
     const balance = user.balanceSeconds ?? 0;
     $('#account-minutes').textContent = outOfTime() ? '시간 없음' : `${formatBalance(balance)} 남음`;
@@ -770,6 +810,105 @@ async function logout() {
   state.user = null;
   renderAccount();
   showLogin();
+}
+
+// ---------- past lessons ----------
+
+function openHistory() {
+  window.speechSynthesis?.cancel();
+  $('#lesson-list').replaceChildren();
+  $('#history-more').hidden = true;
+  showScreen('history');
+  loadHistory();
+}
+
+function setHistoryNote(text, className = 'report-note history-note') {
+  $('#history-note').className = className;
+  $('#history-note').textContent = text;
+  $('#history-note').hidden = !text;
+}
+
+async function loadHistory() {
+  const token = ++state.historyToken;
+  const before = $('#lesson-list').childElementCount ? state.historyNext : null;
+  $('#history-more').disabled = true;
+  if (!before) setHistoryNote('불러오는 중…');
+  let page;
+  try {
+    const res = await fetch(`/api/calls${before ? `?before=${encodeURIComponent(before)}` : ''}`);
+    if (res.status === 401) {
+      showLogin();
+      return;
+    }
+    if (!res.ok) throw new Error();
+    page = await res.json();
+  } catch {
+    if (token !== state.historyToken) return;
+    setHistoryNote('지난 수업을 불러오지 못했어요. 잠시 후 다시 시도해주세요.', 'report-note history-note error');
+    $('#history-more').disabled = false;
+    return;
+  }
+  if (token !== state.historyToken) return;
+  state.historyNext = page.next;
+  $('#lesson-list').append(...page.calls.map(lessonRow));
+  setHistoryNote($('#lesson-list').childElementCount ? '' : '아직 지난 수업이 없어요.\n튜터와 통화하면 여기에 리포트가 쌓여요.');
+  $('#history-more').hidden = !page.next;
+  $('#history-more').disabled = false;
+}
+
+function lessonRow(call) {
+  const { options } = call;
+  const button = el('button', 'lesson');
+  button.type = 'button';
+  const photo = el('span', 'photo');
+  photo.setAttribute('aria-hidden', 'true');
+  setPhoto(photo, options.voice);
+  const text = el('span', 'lesson-text');
+  const details = [topicLabel(options), formatDuration(call.seconds)];
+  if (call.corrections != null) details.push(`고칠 문장 ${call.corrections}개`);
+  text.append(
+    el('b', null, `${capitalize(options.voice)} · ${LANGUAGE_LABELS[options.language] ?? ''} ${LEVEL_LABELS[options.level] ?? ''}`),
+    el('small', null, formatDate(call.startedAt)),
+    el('small', null, details.join(' · ')),
+  );
+  const chevron = icon('i-chevron');
+  chevron.classList.add('row-chevron');
+  button.append(photo, text, chevron);
+  button.addEventListener('click', () => openLesson(call.id, button));
+  const item = el('li');
+  item.append(button);
+  return item;
+}
+
+async function openLesson(id, button) {
+  button.disabled = true;
+  let call;
+  try {
+    const res = await fetch(`/api/calls/${encodeURIComponent(id)}`);
+    if (res.status === 401) {
+      showLogin();
+      return;
+    }
+    if (!res.ok) throw new Error();
+    call = await res.json();
+  } catch {
+    setHistoryNote('이 수업을 불러오지 못했어요. 잠시 후 다시 시도해주세요.', 'report-note history-note error');
+    return;
+  } finally {
+    button.disabled = false;
+  }
+  state.options = call.options;
+  state.callId = call.id;
+  state.lastError = null;
+  state.reportFromHistory = true;
+  renderReportHead({ turns: call.transcript, seconds: call.seconds, startedAt: call.startedAt });
+  // Calls from before the report was made, or whose report failed, get one now.
+  if (call.feedback) {
+    state.feedbackToken++;
+    renderFeedback(call.feedback);
+  } else {
+    loadFeedback();
+  }
 }
 
 // ---------- payments ----------
@@ -903,7 +1042,7 @@ async function init() {
   syncSetup();
   state.config = await (await fetch('/api/config')).json();
   renderVoices(state.config.voices);
-  restoreSettings();
+  applySettings(loadPref(SETTINGS_KEY));
   await refreshUser();
   if (state.user) showScreen('setup');
   else showLogin();
@@ -961,9 +1100,18 @@ $('#account-btn').addEventListener('click', () => $('#sheet-account').showModal(
 $('#logout-btn').addEventListener('click', logout);
 $('#again-btn').addEventListener('click', () => {
   window.speechSynthesis?.cancel();
+  // Call back with the past lesson's tutor and settings.
+  if (state.reportFromHistory) applySettings(state.options);
   startCall();
 });
 $('#settings-btn').addEventListener('click', () => {
+  if (state.reportFromHistory) {
+    openHistory();
+    return;
+  }
   window.speechSynthesis?.cancel();
   showScreen('setup');
 });
+$('#history-btn').addEventListener('click', openHistory);
+$('#history-back').addEventListener('click', () => showScreen('setup'));
+$('#history-more').addEventListener('click', loadHistory);
