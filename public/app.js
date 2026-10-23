@@ -15,7 +15,7 @@ const SPEECH_LANGS = { en: 'en-US', ja: 'ja-JP', zh: 'zh-CN', es: 'es-ES', fr: '
 // Languages written without spaces are diffed per character instead of per word.
 const UNSPACED_LANGUAGES = new Set(['ja', 'zh']);
 
-// Persona for each provider voice (Gemini and Grok). The portraits in
+// Persona for each provider voice. The portraits in
 // /tutors are Open Peeps by Pablo Stanley (CC0), generated with DiceBear.
 const TUTORS = {
   kore: { trait: '또렷하고 차분한', tile: '#dce5f9' },
@@ -26,11 +26,6 @@ const TUTORS = {
   orus: { trait: '단단하고 믿음직한', tile: '#f7dcd8' },
   fenrir: { trait: '에너지 넘치는', tile: '#fde6c4' },
   zephyr: { trait: '밝고 화사한', tile: '#f9edbf' },
-  eve: { trait: '에너지 넘치는', tile: '#f7dcd8' },
-  ara: { trait: '따뜻하고 다정한', tile: '#d3eeee' },
-  leo: { trait: '차분하고 믿음직한', tile: '#dce5f9' },
-  rex: { trait: '자신감 있는', tile: '#d8f0da' },
-  sal: { trait: '부드럽고 편안한', tile: '#fde6c4' },
 };
 const DEFAULT_TUTOR = { trait: '원어민 튜터', tile: '#e5e8eb' };
 

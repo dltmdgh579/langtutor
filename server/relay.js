@@ -1,4 +1,4 @@
-// WebSocket relay between the browser and the voice provider (Grok or Gemini).
+// WebSocket relay between the browser and the voice provider (currently Gemini Live).
 // The browser never sees the API key: it talks to this server, which opens
 // the upstream connection, configures the tutor session, and pipes events.
 // The browser always speaks OpenAI-Realtime-style events; each provider
