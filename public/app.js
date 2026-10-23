@@ -830,13 +830,14 @@ function packRows(tag, onPick) {
   } };
 }
 
-// Public price list on the sign-in screen.
+// Public price list on the sign-in screen. index.html ships the KRW prices so they show
+// without Paddle; once Paddle answers, swap in its prices for the visitor's country.
 function renderPricing() {
-  if (!state.config.payments || $('#price-list').childElementCount) return;
+  const list = $('#price-list');
+  if (!state.config.payments || list.dataset.source === 'paddle') return;
+  list.dataset.source = 'paddle';
   const { rows, fill } = packRows('li');
-  $('#price-list').replaceChildren(...rows);
-  $('#login-pricing').hidden = false;
-  fill().catch(() => {});
+  fill().then(() => list.replaceChildren(...rows)).catch(() => {});
 }
 
 // Pack buttons in the account sheet.

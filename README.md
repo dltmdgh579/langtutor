@@ -80,6 +80,7 @@ update users set balance_seconds = balance_seconds + 30 * 60 where email = 'some
 
 1. **Catalog → Products**에서 상품(예: "통화 시간 60분")을 만들고 **일회성(one-time) 가격**을 추가 → 가격 ID(`pri_…`)
 2. `PADDLE_PRICES`에 `가격ID:분`을 쉼표로 이어서 넣기. 예) `pri_01abc:60,pri_01def:300`
+   - 로그인 화면 가격표(`public/index.html`의 `#price-list`)는 키 없이도 보이도록 원화 가격을 직접 적어 뒀어요. Paddle 심사는 사이트 가격이 카탈로그와 같은지 보니, 가격을 바꾸면 여기도 같이 고치세요. 결제가 켜져 있으면 Paddle이 방문자 나라 통화로 바꿔 보여줘요.
 3. **Developer tools → Authentication → Client-side tokens**에서 토큰 발급 → `PADDLE_CLIENT_TOKEN`
 4. **Developer tools → Notifications → New destination**
    - URL: `https://<배포 주소>/api/paddle/webhook`
