@@ -10,6 +10,17 @@ import { buildTutorInstructions, LANGUAGES, LEVELS, TOPICS } from './prompts.js'
 // How long the provider may take to set up the session before we give up.
 const CONNECT_TIMEOUT_MS = 20_000;
 
+// A minute before the call is cut off, the tutor is told to wrap up. Calls too
+// short for that (a nearly empty balance) just end.
+const WRAP_UP_LEAD_SECONDS = 60;
+const MIN_SECONDS_FOR_WRAP_UP = 90;
+// The note starts a tutor turn, so it waits for a pause: the tutor done talking
+// and the learner quiet this long. A learner who keeps talking gets it anyway
+// after WRAP_UP_FORCE_MS, at the end of the tutor's next reply.
+const WRAP_UP_PAUSE_MS = 1200;
+const WRAP_UP_FORCE_MS = 25_000;
+const WRAP_UP_NOTE = `[Call note] About one minute of this call is left. Now, in one or two short sentences: let the learner know warmly that you're almost out of time, mention one thing they did well today, and say goodbye. If they reply, answer in one short sentence and end the call warmly.`;
+
 // Event types the browser is allowed to send upstream. Session configuration
 // stays server-side so a client cannot swap the instructions or model.
 const CLIENT_EVENT_ALLOWLIST = new Set([
@@ -67,6 +78,72 @@ function createTranscript() {
   };
 }
 
+// Sends the wrap-up note once it's due, at the next pause in the conversation,
+// so the tutor isn't cut off mid-sentence and doesn't talk over the learner.
+// Watches the same events the browser gets.
+function createWrapUp(deliver) {
+  let due = false;
+  // Past WRAP_UP_FORCE_MS the learner's speech no longer holds the note back.
+  let forced = false;
+  let sent = false;
+  let tutorTalking = false;
+  let learnerTalking = false;
+  let pauseTimer = null;
+  let forceTimer = null;
+
+  const send = () => {
+    if (sent) return;
+    sent = true;
+    clearTimeout(pauseTimer);
+    clearTimeout(forceTimer);
+    deliver();
+  };
+  const check = () => {
+    clearTimeout(pauseTimer);
+    if (!due || sent || tutorTalking) return;
+    if (forced) send();
+    else if (!learnerTalking) pauseTimer = setTimeout(send, WRAP_UP_PAUSE_MS);
+  };
+
+  return {
+    due() {
+      due = true;
+      forceTimer = setTimeout(() => {
+        forced = true;
+        check();
+      }, WRAP_UP_FORCE_MS);
+      check();
+    },
+    observe(event) {
+      switch (event.type) {
+        case 'response.created':
+          tutorTalking = true;
+          learnerTalking = false;
+          break;
+        case 'response.done':
+          // Also sent when the learner barges in; their speech follows in the same message.
+          tutorTalking = false;
+          learnerTalking = false;
+          break;
+        case 'input_audio_buffer.speech_started':
+        case 'conversation.item.input_audio_transcription.updated':
+          // Transcripts can trail into the tutor's reply; only count them while the tutor is quiet.
+          if (!tutorTalking) learnerTalking = true;
+          break;
+        default:
+          return;
+      }
+      // Wait for the rest of the provider's message, e.g. a barge-in's speech_started.
+      setImmediate(check);
+    },
+    stop() {
+      sent = true;
+      clearTimeout(pauseTimer);
+      clearTimeout(forceTimer);
+    },
+  };
+}
+
 // limitSeconds (counted from the tutor picking up, like billing) cuts the call
 // off, reported to the browser as limitReason; onEnd receives the billed
 // seconds and transcript exactly once. It doesn't throw: a call that fails to
@@ -79,6 +156,11 @@ export function handleCall(client, { options, callId, limitSeconds, limitReason,
   const transcript = createTranscript();
   const tag = `[call ${callId}]`;
   console.log(`${tag} start (${provider.id})`, options);
+  let wrapUpTimer = null;
+  const wrapUp = createWrapUp(() => {
+    console.log(`${tag} asking the tutor to wrap up`);
+    session.instruct(WRAP_UP_NOTE);
+  });
 
   const sendClient = (event) => {
     if (client.readyState === WebSocket.OPEN) client.send(JSON.stringify(event));
@@ -96,6 +178,8 @@ export function handleCall(client, { options, callId, limitSeconds, limitReason,
     if (closed) return;
     closed = true;
     clearTimeout(limitTimer);
+    clearTimeout(wrapUpTimer);
+    wrapUp.stop();
     // Billing starts when the tutor's session is ready, so failed calls are free.
     const billedSeconds = answeredAt ? Math.ceil((Date.now() - answeredAt) / 1000) : 0;
     console.log(`${tag} end: ${reason} (${billedSeconds}s)`);
@@ -117,6 +201,7 @@ export function handleCall(client, { options, callId, limitSeconds, limitReason,
       emit: (event) => {
         if (event.type === 'error') console.warn(`${tag} upstream error`, event.error ?? event);
         transcript.record(event);
+        wrapUp.observe(event);
         sendClient(event);
       },
       ready: ({ inputSampleRate, outputSampleRate }) => {
@@ -124,6 +209,12 @@ export function handleCall(client, { options, callId, limitSeconds, limitReason,
         answeredAt = Date.now();
         clearTimeout(limitTimer);
         limitTimer = setTimeout(() => hangUp(limitReason), limitSeconds * 1000);
+        if (limitSeconds >= MIN_SECONDS_FOR_WRAP_UP) {
+          wrapUpTimer = setTimeout(() => {
+            sendClient({ type: 'relay.time_left', seconds: WRAP_UP_LEAD_SECONDS, reason: limitReason });
+            wrapUp.due();
+          }, (limitSeconds - WRAP_UP_LEAD_SECONDS) * 1000);
+        }
         sendClient({ type: 'relay.ready', inputSampleRate, outputSampleRate, voice: options.voice, callId });
       },
     });

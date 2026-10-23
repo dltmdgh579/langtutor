@@ -182,6 +182,7 @@ button { font: inherit; letter-spacing: inherit; color: inherit; cursor: pointer
   font-variant-numeric: tabular-nums;
 }
 .account-btn:hover { background: var(--bg-sub); }
+.history-btn + .account-btn { margin-left: 8px; }
 .account-btn.empty { border-color: var(--red); color: var(--red); }
 .account-btn .avatar { width: 28px; height: 28px; font-size: 12px; }
 
@@ -211,6 +212,43 @@ button { font: inherit; letter-spacing: inherit; color: inherit; cursor: pointer
 .pack span { color: var(--text-2); font-variant-numeric: tabular-nums; }
 .pay-note { min-height: 1.4em; margin: 10px 0 0; font-size: 13.5px; color: var(--text-3); }
 .pay-note:empty { display: none; }
+
+/* ---------- 4. history ---------- */
+
+.history-btn {
+  display: flex; align-items: center; gap: 6px;
+  margin-left: auto; height: 38px; padding: 0 12px;
+  border: 0; border-radius: 999px;
+  background: none;
+  font-size: 13.5px; font-weight: 600; color: var(--text-2);
+}
+.history-btn:hover { background: var(--bg-sub); }
+.history-btn .icon { width: 18px; height: 18px; }
+
+.back-btn {
+  display: grid; place-items: center;
+  width: 40px; height: 40px; margin-left: -10px;
+  border: 0; border-radius: 50%; background: none; color: var(--text);
+}
+.back-btn:hover { background: var(--bg-sub); }
+.back-btn .icon { width: 24px; height: 24px; }
+
+.screen.history { min-height: 100dvh; padding-bottom: calc(24px + env(safe-area-inset-bottom)); }
+.lessons { margin: 20px 0 0; padding: 0; list-style: none; }
+.lesson {
+  display: flex; align-items: center; gap: 14px;
+  width: 100%; padding: 14px var(--side);
+  border: 0; background: none; text-align: left;
+  transition: background 120ms ease;
+}
+.lesson:hover { background: var(--bg-sub); }
+.lesson .photo { width: 48px; height: 48px; flex: none; border-radius: 16px; font-size: 20px; }
+.lesson-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.lesson-text b { font-size: 16px; font-weight: 600; }
+.lesson-text small { font-size: 13.5px; line-height: 1.45; color: var(--text-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lesson .row-chevron { flex: none; }
+.history-note { margin-left: var(--side); margin-right: var(--side); }
+.history-more { display: block; margin: 8px auto 0; padding: 0 20px; }
 
 /* ---------- 1. setup ---------- */
 
@@ -349,6 +387,11 @@ body.in-call { height: 100dvh; overflow: hidden; background: #0c0c0e; color: #ff
 .call-line { display: flex; justify-content: center; gap: 8px; margin: 6px 0 0; font-size: 16px; color: rgb(255 255 255 / 0.7); }
 .call-line .timer { font-variant-numeric: tabular-nums; }
 .call-line .timer::before { content: "·"; margin-right: 8px; }
+.call-notice {
+  display: inline-block; margin: 12px 0 0; padding: 6px 12px; border-radius: 999px;
+  background: rgb(255 255 255 / 0.16); color: #fff;
+  font-size: 14px; font-weight: 600; font-variant-numeric: tabular-nums;
+}
 
 .call-photo { position: relative; width: 148px; height: 148px; margin: 32px auto 0; }
 .call-photo .photo {
@@ -500,6 +543,7 @@ body.in-call { height: 100dvh; overflow: hidden; background: #0c0c0e; color: #ff
   :root { --side: 16px; }
   .tutors { gap: 16px 8px; }
   .tutor-trait { display: none; }
+  .history-btn span { display: none; }
 }
 
 @media (prefers-reduced-motion: reduce) {

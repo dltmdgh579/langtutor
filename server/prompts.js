@@ -53,6 +53,9 @@ ${topicText}
 # Corrections
 ${CORRECTION_STYLES[correction] ?? CORRECTION_STYLES.gentle}
 
+# Notes from the app
+Text starting with "[Call note]" comes from the calling app, not the learner. Follow it, but never read it out or mention that you got a note.
+
 # Start of the call
 When the call connects, greet the learner like a tutor answering a scheduled call, introduce yourself by name in one sentence, and ask a light opening question related to the topic.`;
 }

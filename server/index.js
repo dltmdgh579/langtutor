@@ -31,6 +31,8 @@ if (!config.providerConfig.apiKey) {
 
 // Shorter calls aren't worth connecting for; the learner is told they're out of time.
 const MIN_CALL_SECONDS = 30;
+// Past lessons per page of the history list.
+const CALLS_PAGE_SIZE = 20;
 
 const { GOOGLE_CLIENT_ID, DATABASE_URL } = process.env;
 if (Boolean(GOOGLE_CLIENT_ID) !== Boolean(DATABASE_URL)) {
@@ -254,6 +256,29 @@ async function handleApi(req, res) {
       console.error('feedback failed:', err.message);
       sendJson(res, 502, { error: '피드백 생성에 실패했어요.' });
     }
+    return;
+  }
+  if (route === 'GET /api/calls') {
+    const before = new URL(req.url, 'http://localhost').searchParams.get('before');
+    // A call that just ended shows up once it's saved.
+    const ending = callsByUser.get(user.id);
+    if (ending && !ending.live) await settled(ending);
+    const calls = await db.listCalls(user.id, { before, limit: CALLS_PAGE_SIZE + 1 });
+    sendJson(res, 200, {
+      calls: calls.slice(0, CALLS_PAGE_SIZE),
+      next: calls.length > CALLS_PAGE_SIZE ? calls[CALLS_PAGE_SIZE - 1].id : null,
+    });
+    return;
+  }
+  const callRoute = route.match(/^GET \/api\/calls\/(\d+)$/);
+  if (callRoute) {
+    const call = await db.getCall(callRoute[1], user.id);
+    if (!call?.transcript) {
+      sendJson(res, 404, { error: '통화 기록을 찾지 못했어요.' });
+      return;
+    }
+    const { options, transcript, feedback, startedAt, seconds } = call;
+    sendJson(res, 200, { id: callRoute[1], options, transcript, feedback, startedAt, seconds });
     return;
   }
   sendJson(res, 404, { error: 'Not found' });
