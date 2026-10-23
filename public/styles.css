@@ -140,13 +140,24 @@ button { font: inherit; letter-spacing: inherit; color: inherit; cursor: pointer
 .login-features b { font-size: 15px; font-weight: 700; }
 .login-features span { font-size: 14px; line-height: 1.5; color: var(--text-2); }
 .login-pricing .section-label { margin-top: 32px; }
+.trial-callout {
+  display: flex; flex-direction: column; gap: 2px;
+  margin: 4px var(--side) 8px; padding: 14px 16px; border-radius: 14px;
+  background: var(--add-bg);
+}
+.trial-callout[hidden] { display: none; }
+.trial-callout b { font-size: 16px; font-weight: 700; color: var(--add); }
+.trial-callout span { font-size: 14px; line-height: 1.5; color: var(--text-2); }
 .price-list { margin: 4px var(--side) 0; padding: 0; list-style: none; }
 .price-list li {
-  display: flex; justify-content: space-between;
+  display: flex; align-items: center; justify-content: space-between;
   padding: 12px 0; border-bottom: 1px solid var(--line);
   font-size: 15px; font-weight: 600; font-variant-numeric: tabular-nums;
 }
-.price-list li span { color: var(--text-2); }
+.pack-name { display: flex; flex-direction: column; }
+.pack-name small { font-size: 12.5px; font-weight: 500; color: var(--text-3); }
+.pack-name small:empty { display: none; }
+.price-list .pack-price { color: var(--text-2); }
 .price-note { margin: 10px var(--side) 0; font-size: 13px; line-height: 1.5; color: var(--text-3); }
 
 /* ---------- privacy policy ---------- */
@@ -208,7 +219,8 @@ button { font: inherit; letter-spacing: inherit; color: inherit; cursor: pointer
 }
 .pack:hover { background: var(--bg-sub); }
 .pack:disabled { opacity: 0.5; cursor: default; }
-.pack span { color: var(--text-2); font-variant-numeric: tabular-nums; }
+.pack .pack-name { align-items: flex-start; color: var(--text); }
+.pack .pack-price { color: var(--text-2); font-variant-numeric: tabular-nums; }
 .pay-note { min-height: 1.4em; margin: 10px 0 0; font-size: 13.5px; color: var(--text-3); }
 .pay-note:empty { display: none; }
 
